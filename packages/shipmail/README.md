@@ -811,4 +811,5 @@ This is the recommended pattern for unit tests. No HTTP interception or mocking 
 - [TypeScript SDK guide](https://shipmail.to/docs/sdks/typescript)
 - [`shipmail-mcp` (MCP server)](https://www.npmjs.com/package/shipmail-mcp)
 - [Changelog](./CHANGELOG.md)
+- [Source](https://github.com/shipmail-to/shipmail-node)
 - [Issues](https://github.com/shipmail-to/shipmail-node/issues)

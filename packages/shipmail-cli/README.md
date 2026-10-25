@@ -221,3 +221,9 @@ shipmail audiences feed update aud_123 \
 ```
 
 Run `shipmail --help` for flags and examples.
+
+## Links
+
+- [CLI guide](https://shipmail.to/docs/cli)
+- [Source](https://github.com/shipmail-to/shipmail-node/tree/main/packages/shipmail-cli)
+- [Issues](https://github.com/shipmail-to/shipmail-node/issues)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.6 (2026-10-25)
+
+
+### Bug Fixes
+
+* **sdk:** link each package to its public source repository
+
 ## 0.6.5 (2026-10-23)
 
 
@@ -96,7 +103,6 @@
 ## 0.5.0 (2026-09-03)
 
 
-### ⚠ BREAKING CHANGES
 
 
 ### Features
@@ -252,7 +258,6 @@
 ## 0.2.0 (2026-07-16)
 
 
-### ⚠ BREAKING CHANGES
 
 
 ### Features

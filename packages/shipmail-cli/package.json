@@ -1,0 +1,55 @@
+{
+  "name": "shipmail-cli",
+  "version": "0.6.5",
+  "description": "Official CLI for the Shipmail API",
+  "type": "module",
+  "bin": {
+    "shipmail": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --dts --clean",
+    "dev": "tsx src/cli.ts",
+    "prepack": "bun run build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "shipmail",
+    "email",
+    "cli",
+    "email-api",
+    "domain",
+    "terminal"
+  ],
+  "author": "Shipmail",
+  "license": "MIT",
+  "homepage": "https://shipmail.to/docs/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shipmail-to/shipmail-node.git",
+    "directory": "packages/shipmail-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/shipmail-to/shipmail-node/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "shipmail": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3"
+  }
+}

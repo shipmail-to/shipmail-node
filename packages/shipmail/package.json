@@ -1,0 +1,81 @@
+{
+  "name": "shipmail",
+  "version": "0.6.6",
+  "description": "Official TypeScript SDK for the Shipmail API",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./api-key-scopes": {
+      "import": {
+        "types": "./dist/api-key-scopes.d.ts",
+        "default": "./dist/api-key-scopes.js"
+      },
+      "require": {
+        "types": "./dist/api-key-scopes.d.cts",
+        "default": "./dist/api-key-scopes.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "api-key-scopes": [
+        "./dist/api-key-scopes.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepack": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint:package": "publint && attw --pack"
+  },
+  "keywords": [
+    "shipmail",
+    "email",
+    "api",
+    "sdk",
+    "typescript",
+    "email-api"
+  ],
+  "author": "Shipmail",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shipmail-to/shipmail-node.git",
+    "directory": "packages/shipmail"
+  },
+  "homepage": "https://shipmail.to/docs/sdks/typescript",
+  "bugs": {
+    "url": "https://github.com/shipmail-to/shipmail-node/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@types/bun": "latest",
+    "publint": "^0.3.18",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}

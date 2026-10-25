@@ -1,0 +1,18 @@
+{
+  "name": "shipmail-node",
+  "private": true,
+  "packageManager": "bun@1.3.10",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --cwd packages/shipmail build && bun run --cwd packages/shipmail-cli build",
+    "typecheck": "bun run --cwd packages/shipmail typecheck && bun run --cwd packages/shipmail-cli typecheck",
+    "test": "bun run --cwd packages/shipmail test && bun run --cwd packages/shipmail-cli test",
+    "lint:package": "bun run --cwd packages/shipmail lint:package"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.3.0"
+  }
+}

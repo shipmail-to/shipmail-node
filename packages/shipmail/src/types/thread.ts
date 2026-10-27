@@ -28,6 +28,7 @@ export type ReplyToThreadParams = {
   readonly html?: string | undefined;
   readonly text?: string | undefined;
   readonly cc?: readonly EmailRecipientInput[] | undefined;
+  readonly bcc?: readonly EmailRecipientInput[] | undefined;
   readonly scheduled_at?: string | undefined;
   readonly track_reply?: boolean | undefined;
   readonly sandbox_outcome?: SandboxOutcome | undefined;

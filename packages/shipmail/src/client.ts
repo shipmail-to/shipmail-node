@@ -15,6 +15,7 @@ import { ReplyScans } from "./resources/reply-scans.js";
 import { ScheduledMessages } from "./resources/scheduled-messages.js";
 import { Status } from "./resources/status.js";
 import { Suppressions } from "./resources/suppressions.js";
+import { Templates } from "./resources/templates.js";
 import { Threads } from "./resources/threads.js";
 import { Webhooks } from "./resources/webhooks.js";
 import type { ApiErrorBody, MethodOptions, ShipmailConfig } from "./types/common.js";
@@ -98,6 +99,7 @@ export class ShipmailClient {
   readonly replyScans: ReplyScans;
   readonly scheduledMessages: ScheduledMessages;
   readonly suppressions: Suppressions;
+  readonly templates: Templates;
   readonly threads: Threads;
   readonly webhooks: Webhooks;
   readonly status: Status;
@@ -142,6 +144,7 @@ export class ShipmailClient {
     this.replyScans = new ReplyScans(this);
     this.scheduledMessages = new ScheduledMessages(this);
     this.suppressions = new Suppressions(this);
+    this.templates = new Templates(this);
     this.threads = new Threads(this);
     this.webhooks = new Webhooks(this);
     this.status = new Status(this);

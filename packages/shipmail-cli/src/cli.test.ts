@@ -65,6 +65,8 @@ describe("shipmail CLI", () => {
     expect(stdout.text()).toContain("shipmail booking-pages create");
     expect(stdout.text()).toContain("shipmail booking-links create");
     expect(stdout.text()).toContain("shipmail members list");
+    expect(stdout.text()).toContain("shipmail members invite <email> --role admin|member");
+    expect(stdout.text()).toContain("shipmail members mailboxes grant <member-id> <mailbox-id>");
     expect(stdout.text()).toContain("role is owner, admin, or member");
     expect(stdout.text()).toContain("selected IDs may be limited");
     expect(stdout.text()).toContain("shipmail inbox list <mailbox-id>");
@@ -392,6 +394,281 @@ describe("shipmail CLI", () => {
     expect(stdout.text()).toBe(`${JSON.stringify(response, null, 2)}\n`);
   });
 
+  test("prints template commands in help", async () => {
+    const stdout = createOutput();
+    const code = await runCli(["--help"], { stdout: stdout.out, env: {} });
+
+    expect(code).toBe(0);
+    expect(stdout.text()).toContain("shipmail templates create --name");
+    expect(stdout.text()).toContain("shipmail templates restore <template-id> <version>");
+    expect(stdout.text()).toContain(
+      "--template tpl_... [--template-version 2] [--var name=Ada ...]",
+    );
+  });
+
+  test("creates a template with fallbacks, a body from a file, and publish", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "shipmail-template-"));
+    const htmlPath = join(dir, "welcome.html");
+    writeFileSync(htmlPath, "<p>Hi {{name}}, plan {{plan}}</p>");
+    let captured: CapturedRequest | undefined;
+    try {
+      const code = await runCli(
+        [
+          "templates",
+          "create",
+          "--name",
+          "Welcome",
+          "--subject",
+          "Welcome, {{name}}",
+          "--html",
+          `@${htmlPath}`,
+          "--fallback",
+          "plan=Free, for now",
+          "--fallback",
+          "name=there",
+          "--publish",
+        ],
+        {
+          stdout: createOutput().out,
+          env: { SHIPMAIL_API_KEY: "sm_live_test" },
+          fetch: stubFetch(async (input, init) => {
+            captured = { url: new URL(String(input)), init };
+            return jsonResponse({ object: "template", id: "tpl_123" }, { status: 201 });
+          }),
+        },
+      );
+
+      expect(code).toBe(0);
+      expect(captured?.init?.method).toBe("POST");
+      expect(captured?.url.pathname).toBe("/api/v1/templates");
+      expect(await readJsonBody(captured?.init)).toEqual({
+        name: "Welcome",
+        subject: "Welcome, {{name}}",
+        html: "<p>Hi {{name}}, plan {{plan}}</p>",
+        fallbacks: { plan: "Free, for now", name: "there" },
+        publish: true,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("updates a template draft, clearing html and fallbacks", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      [
+        "templates",
+        "update",
+        "tpl_123",
+        "--subject",
+        "Hello",
+        "--text",
+        "Hi",
+        "--clear-html",
+        "--clear-fallbacks",
+      ],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({ object: "template", id: "tpl_123" });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("PATCH");
+    expect(captured?.url.pathname).toBe("/api/v1/templates/tpl_123");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      subject: "Hello",
+      html: null,
+      text: "Hi",
+      fallbacks: {},
+    });
+  });
+
+  test("routes the other template commands to their endpoints", async () => {
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return jsonResponse({ object: "template", id: "tpl_123" });
+    });
+    const commands: readonly (readonly string[])[] = [
+      ["templates", "list", "--limit", "10"],
+      ["templates", "get", "tpl_123"],
+      ["templates", "publish", "tpl_123"],
+      ["templates", "render", "tpl_123", "--var", "name=Ada", "--template-version", "2"],
+      ["templates", "versions", "tpl_123", "--cursor", "cur_1"],
+      ["templates", "version", "tpl_123", "2"],
+      ["templates", "restore", "tpl_123", "1"],
+      ["templates", "delete", "tpl_123"],
+    ];
+
+    for (const args of commands) {
+      const code = await runCli(args, {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch,
+      });
+      expect(code).toBe(0);
+    }
+
+    expect(
+      requests.map(({ url, init }) => `${init?.method ?? "GET"} ${url.pathname}${url.search}`),
+    ).toEqual([
+      "GET /api/v1/templates?limit=10",
+      "GET /api/v1/templates/tpl_123",
+      "POST /api/v1/templates/tpl_123/publish",
+      "POST /api/v1/templates/tpl_123/render",
+      "GET /api/v1/templates/tpl_123/versions?cursor=cur_1",
+      "GET /api/v1/templates/tpl_123/versions/2",
+      "POST /api/v1/templates/tpl_123/versions/1/restore",
+      "DELETE /api/v1/templates/tpl_123",
+    ]);
+    expect(await readJsonBody(requests[3]?.init)).toEqual({
+      variables: { name: "Ada" },
+      version: 2,
+    });
+  });
+
+  test("sends a message by template with string variables", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      [
+        "messages",
+        "send",
+        "--from",
+        "hello@example.com",
+        "--to",
+        "ada@example.com",
+        "--template",
+        "tpl_123",
+        "--template-version",
+        "3",
+        "--var",
+        "name=Ada",
+        "--var",
+        "count=3",
+      ],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({ object: "message", id: "msg_123" });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/api/v1/messages");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      from: "hello@example.com",
+      to: ["ada@example.com"],
+      template: { id: "tpl_123", version: 3, variables: { name: "Ada", count: "3" } },
+    });
+  });
+
+  test("prints validation detail codes from a refused template send", async () => {
+    const stderr = createOutput();
+    const code = await runCli(
+      [
+        "messages",
+        "send",
+        "--from",
+        "a@example.com",
+        "--to",
+        "b@example.com",
+        "--template",
+        "tpl_1",
+      ],
+      {
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async () =>
+          jsonResponse(
+            {
+              error: {
+                type: "validation_error",
+                message: "Template variables are invalid.",
+                details: [
+                  {
+                    field: "template.variables.name",
+                    message: "Missing variable name.",
+                    code: "missing_variable",
+                  },
+                ],
+              },
+            },
+            { status: 422 },
+          ),
+        ),
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain(
+      "template.variables.name: Missing variable name. (missing_variable)",
+    );
+  });
+
+  test("refuses invalid template flag combinations before any request", async () => {
+    const send = ["messages", "send", "--from", "a@example.com", "--to", "b@example.com"];
+    const cases: readonly { readonly args: readonly string[]; readonly message: string }[] = [
+      {
+        args: [...send, "--template", "tpl_1", "--subject", "Hi"],
+        message: "--subject cannot be used with --template",
+      },
+      {
+        args: [...send, "--template", "tpl_1", "--html", "<p>Hi</p>"],
+        message: "--html cannot be used with --template",
+      },
+      {
+        args: [...send, "--subject", "Hi", "--text", "Hi", "--var", "name=Ada"],
+        message: "--template-version and --var need --template.",
+      },
+      {
+        args: [...send, "--template", "tpl_1", "--var", "name"],
+        message: "--var must use key=value format.",
+      },
+      {
+        args: ["templates", "create", "--name", "Welcome", "--subject", "Hi"],
+        message: "Provide --html or --text.",
+      },
+      {
+        args: ["templates", "update", "tpl_1", "--html", "<p>Hi</p>", "--clear-html"],
+        message: "Use either --html or --clear-html, not both.",
+      },
+      {
+        args: ["templates", "update", "tpl_1"],
+        message: "Provide at least one field to change.",
+      },
+      {
+        args: ["templates", "version", "tpl_1", "latest"],
+        message: "Version must be a positive integer.",
+      },
+    ];
+
+    for (const { args, message } of cases) {
+      const stderr = createOutput();
+      let called = false;
+      const code = await runCli(args, {
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async () => {
+          called = true;
+          return jsonResponse({});
+        }),
+      });
+
+      expect(called).toBe(false);
+      expect(code).toBe(1);
+      expect(stderr.text()).toContain(message);
+    }
+  });
+
   test("gets an owner with implicit all-mailbox access", async () => {
     const stdout = createOutput();
     let captured: CapturedRequest | undefined;
@@ -417,6 +694,162 @@ describe("shipmail CLI", () => {
     expect(code).toBe(0);
     expect(captured?.url.pathname).toBe("/api/v1/members/mem_owner");
     expect(stdout.text()).toBe(`${JSON.stringify(response, null, 2)}\n`);
+  });
+
+  test("invites a member with selected mailboxes and an idempotency key", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+    const response = {
+      object: "invitation",
+      id: "inv_sam",
+      email: "sam@example.com",
+      role: "member",
+      mailbox_access: { scope: "selected", mailbox_ids: ["mbx_support", "mbx_sales"] },
+      newsletter_role: "editor",
+      created_at: "2026-10-27T00:00:00.000Z",
+      expires_at: "2026-11-03T00:00:00.000Z",
+    };
+
+    const code = await runCli(
+      [
+        "members",
+        "invite",
+        "sam@example.com",
+        "--role",
+        "member",
+        "--mailbox",
+        "mbx_support",
+        "--mailbox",
+        "mbx_sales",
+        "--newsletter-editor",
+        "--idempotency-key",
+        "invite-sam",
+      ],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse(response, { status: 201 });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("POST");
+    expect(captured?.url.pathname).toBe("/api/v1/members/invitations");
+    expect(headersFrom(captured?.init).get("idempotency-key")).toBe("invite-sam");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      email: "sam@example.com",
+      role: "member",
+      mailbox_ids: ["mbx_support", "mbx_sales"],
+      newsletter_role: "editor",
+    });
+    expect(stdout.text()).toBe(`${JSON.stringify(response, null, 2)}\n`);
+  });
+
+  test("invites an admin with every mailbox", async () => {
+    let body: unknown;
+    const code = await runCli(
+      ["members", "invite", "ops@example.com", "--role", "admin", "--all-mailboxes"],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (_input, init) => {
+          body = await readJsonBody(init);
+          return jsonResponse({}, { status: 201 });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(body).toEqual({ email: "ops@example.com", role: "admin", mailbox_access: "all" });
+  });
+
+  test("rejects an invitation that mixes every mailbox with selected ones", async () => {
+    const stderr = createOutput();
+    const code = await runCli(
+      [
+        "members",
+        "invite",
+        "ops@example.com",
+        "--role",
+        "admin",
+        "--all-mailboxes",
+        "--mailbox",
+        "mbx_support",
+      ],
+      { stderr: stderr.out, env: { SHIPMAIL_API_KEY: "sm_live_test" } },
+    );
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Use either --all-mailboxes or --mailbox, not both.");
+  });
+
+  test("rejects an unknown invitation role", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["members", "invite", "ops@example.com", "--role", "owner"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+    });
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("--role must be admin or member.");
+  });
+
+  test("lists and cancels member invitations", async () => {
+    const stdout = createOutput();
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse({ data: [] });
+    });
+    const options = { stdout: stdout.out, env: { SHIPMAIL_API_KEY: "sm_live_test" }, fetch };
+
+    expect(await runCli(["members", "invitations", "list"], options)).toBe(0);
+    expect(await runCli(["members", "invitations", "cancel", "inv_sam"], options)).toBe(0);
+
+    expect(requests.map((request) => [request.init?.method, request.url.pathname])).toEqual([
+      ["GET", "/api/v1/members/invitations"],
+      ["DELETE", "/api/v1/members/invitations/inv_sam"],
+    ]);
+    expect(stdout.text()).toContain(JSON.stringify({ ok: true, id: "inv_sam" }, null, 2));
+  });
+
+  test("shares and unshares a mailbox with a member", async () => {
+    const requests: CapturedRequest[] = [];
+    const member = {
+      object: "member",
+      id: "mem_sam",
+      email: "sam@example.com",
+      name: "Sam",
+      role: "member",
+      mailbox_access: { scope: "selected", mailbox_ids: ["mbx_sales"] },
+      created_at: "2026-10-01T00:00:00.000Z",
+    };
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      return jsonResponse(member);
+    });
+    const options = {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch,
+    };
+
+    expect(await runCli(["members", "mailboxes", "grant", "mem_sam", "mbx_sales"], options)).toBe(
+      0,
+    );
+    expect(await runCli(["members", "mailboxes", "revoke", "mem_sam", "mbx_sales"], options)).toBe(
+      0,
+    );
+
+    expect(requests.map((request) => [request.init?.method, request.url.pathname])).toEqual([
+      ["PUT", "/api/v1/members/mem_sam/mailboxes/mbx_sales"],
+      ["DELETE", "/api/v1/members/mem_sam/mailboxes/mbx_sales"],
+    ]);
   });
 
   test("creates and manually runs an automation", async () => {
@@ -1730,6 +2163,8 @@ describe("shipmail CLI", () => {
           "thr_123",
           "--to",
           "user@example.com",
+          "--bcc",
+          "manager@example.com",
           "--text",
           "Following up",
         ],
@@ -1741,6 +2176,9 @@ describe("shipmail CLI", () => {
       "/v1/mailboxes/mbx_123/inbox/messages/eml_123/reply",
       "/v1/mailboxes/mbx_123/inbox/threads/thr_123/reply",
     ]);
+    expect(JSON.parse(String(requests[1]?.init?.body))).toMatchObject({
+      bcc: ["manager@example.com"],
+    });
   });
 
   test("runs the versioned inbox draft and reply-scan workflow", async () => {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.7 (2026-10-27)
+
+
+### Features
+
+* act on AgentMail's Claude reply findings
+* **agents:** invite colleagues over the API and limit agent connections to mailboxes
+
 ## 0.6.6 (2026-10-25)
 
 

@@ -6,6 +6,7 @@ import type {
   PaginationParams,
   SandboxOutcome,
 } from "./common.js";
+import type { SendMessageTemplate } from "./template.js";
 
 export type MessageRuleDisposition = {
   readonly matched_rule_ids: readonly string[];
@@ -96,7 +97,7 @@ export type OutboundHeader = {
 
 export type MessageMetadata = Readonly<Record<string, string | number | boolean | null>>;
 
-export type SendMessageParams = {
+type SendMessageCommonParams = {
   readonly mailbox_id?: string | undefined;
   /**
    * Sending mailbox: `hello@example.com` or `Acme Support <hello@example.com>`.
@@ -107,9 +108,6 @@ export type SendMessageParams = {
   readonly cc?: readonly EmailRecipientInput[] | undefined;
   readonly bcc?: readonly EmailRecipientInput[] | undefined;
   readonly reply_to?: EmailRecipientInput | undefined;
-  readonly subject: string;
-  readonly html?: string | undefined;
-  readonly text?: string | undefined;
   readonly in_reply_to?: string | undefined;
   readonly references?: readonly string[] | undefined;
   readonly attachments?: readonly Attachment[] | undefined;
@@ -122,6 +120,23 @@ export type SendMessageParams = {
   readonly track_reply?: boolean | undefined;
   readonly sandbox_outcome?: SandboxOutcome | undefined;
 };
+
+// Either a subject with html and/or text, or a stored template, which supplies all three.
+export type SendMessageParams = SendMessageCommonParams &
+  (
+    | {
+        readonly subject: string;
+        readonly html?: string | undefined;
+        readonly text?: string | undefined;
+        readonly template?: undefined;
+      }
+    | {
+        readonly template: SendMessageTemplate;
+        readonly subject?: undefined;
+        readonly html?: undefined;
+        readonly text?: undefined;
+      }
+  );
 
 export type ScheduledMessageRecipient = {
   readonly address: string;
@@ -244,6 +259,7 @@ export type ReplyToMessageParams = {
   readonly text?: string | undefined;
   readonly to: readonly EmailRecipientInput[];
   readonly cc?: readonly EmailRecipientInput[] | undefined;
+  readonly bcc?: readonly EmailRecipientInput[] | undefined;
   readonly client_reference?: string | undefined;
   readonly metadata?: MessageMetadata | undefined;
   readonly source_rfc_message_id?: string | undefined;

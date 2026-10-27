@@ -1,6 +1,6 @@
 {
   "name": "shipmail-cli",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Official CLI for the Shipmail API",
   "type": "module",
   "bin": {

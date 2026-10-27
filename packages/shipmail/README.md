@@ -18,6 +18,7 @@ Official TypeScript SDK for the [Shipmail](https://shipmail.to) API. Zero runtim
 - [Domains](#domains)
 - [Mailboxes](#mailboxes)
 - [Messages](#messages)
+- [Templates](#templates)
 - [Scheduled messages and attachments](#scheduled-messages-and-attachments)
 - [Sandbox](#sandbox)
 - [Threads](#threads)
@@ -282,6 +283,45 @@ await shipmail.messages.reply("msg_...", {
   text: "Thanks for your email.",
 });
 ```
+
+## Templates
+
+Store a subject and body with `{{key}}` variables, publish it, then send it by ID. A send uses the
+published version unless it pins another, so editing the draft never changes what goes out.
+
+```ts
+const template = await shipmail.templates.create({
+  name: "Welcome",
+  subject: "Welcome, {{name}}",
+  html: "<p>Hi {{name}}, you are on the {{plan}} plan.</p>",
+  fallbacks: { plan: "Free" }, // a key without a fallback is required at send time
+  publish: true, // also publish the draft as version 1
+});
+
+// Preview the draft, or a published version, with sample values
+const preview = await shipmail.templates.render(template.id, {
+  variables: { name: "Ada" },
+});
+
+await shipmail.messages.send({
+  from: "hello@example.com",
+  to: ["ada@example.com"],
+  template: { id: template.id, variables: { name: "Ada" } }, // no subject, html or text
+});
+
+await shipmail.templates.update(template.id, { subject: "Welcome aboard, {{name}}" }); // draft only
+await shipmail.templates.publish(template.id); // version 2
+await shipmail.templates.listVersions(template.id);
+await shipmail.templates.getVersion(template.id, 1);
+await shipmail.templates.restoreVersion(template.id, 1); // copies version 1 into the draft
+await shipmail.templates.list({ limit: 25 });
+await shipmail.templates.delete(template.id);
+```
+
+A send naming an unknown template fails with `NotFoundError`. A template that was never published,
+a required variable left out, or a variable the template does not use fails with
+`ValidationError`, whose `details[].code` is `template_not_published`, `missing_variable` or
+`unknown_variable`.
 
 ## Scheduled messages and attachments
 
@@ -602,7 +642,7 @@ for await (const domain of shipmail.domains.listAutoPaginating({ limit: 25 })) {
 }
 ```
 
-`listAutoPaginating` is available on `domains`, `mailboxes`, `messages`, `threads`, `webhooks`, `webhooks.listDeliveriesAutoPaginating`, `suppressions`, `members`, `bookingPages`, `bookingLinks`, `calendar.events`, `audiences`, `audiences.subscribers`, `newsletters`, `newsletters.domains`, `newsletters.senderIdentities`, and `newsletters.assets`.
+`listAutoPaginating` is available on `domains`, `mailboxes`, `messages`, `templates`, `templates.listVersionsAutoPaginating`, `threads`, `webhooks`, `webhooks.listDeliveriesAutoPaginating`, `suppressions`, `members`, `bookingPages`, `bookingLinks`, `calendar.events`, `audiences`, `audiences.subscribers`, `newsletters`, `newsletters.domains`, `newsletters.senderIdentities`, and `newsletters.assets`.
 
 ## Webhook verification
 

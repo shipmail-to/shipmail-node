@@ -19,9 +19,11 @@ import {
   type CreateCalendarEventParams,
   type CreateMailboxAppPasswordParams,
   type CreateNewsletterParams,
+  type CreateTemplateParams,
   type DomainHealth,
   type DomainHealthProvider,
   type EmailRecipientInput,
+  type InviteMemberParams,
   type ListCalendarEventsParams,
   type ListDeliveriesParams,
   type ListSubscribersParams,
@@ -43,8 +45,10 @@ import {
   type UpdateMailboxDeliveryRoutingParams,
   type UpdateNewsletterParams,
   type UpdateScheduledMessageParams,
+  type UpdateTemplateParams,
   type UpdateWebhookParams,
   type UpdateWelcomeStepParams,
+  ValidationError,
   WEBHOOK_EVENT_TYPES,
   type WebhookEventType,
 } from "shipmail";
@@ -231,6 +235,25 @@ function getStringList(options: ParsedArgs["options"], key: string): readonly st
   if (value === undefined) return [];
   if (isStringArray(value)) return value.flatMap(splitValues);
   return splitValues(value);
+}
+
+// Repeatable key=value flags. Unlike getStringList, values keep their commas.
+function getKeyValues(
+  options: ParsedArgs["options"],
+  key: string,
+): Record<string, string> | undefined {
+  const value = optionValue(options, key);
+  if (value === undefined) return undefined;
+  const entries = isStringArray(value) ? value : [value];
+  const result: Record<string, string> = {};
+  for (const entry of entries) {
+    const index = typeof entry === "string" ? entry.indexOf("=") : -1;
+    if (typeof entry !== "string" || index <= 0) {
+      throw new CliUsageError(`--${key} must use key=value format.`);
+    }
+    result[entry.slice(0, index).trim()] = entry.slice(index + 1);
+  }
+  return result;
 }
 
 function validateBaseUrl(rawValue: string, allowInsecure: boolean): string {
@@ -829,6 +852,11 @@ Usage:
   shipmail mailboxes sandbox-inbound <id> --from sender@example.com --subject "Test" (--text "Hello" | --html "<p>Hello</p>") [--to support@example.com]
   shipmail members list [--limit 25] [--cursor cur]
   shipmail members get <id>
+  shipmail members invitations list
+  shipmail members invite <email> --role admin|member [--all-mailboxes] [--mailbox <mailbox-id> ...] [--newsletter-editor] [--idempotency-key key]
+  shipmail members invitations cancel <invitation-id>
+  shipmail members mailboxes grant <member-id> <mailbox-id>
+  shipmail members mailboxes revoke <member-id> <mailbox-id>
   shipmail inbox list <mailbox-id> [--folder-role inbox] [--search text] [--from text] [--to text] [--subject text] [--has-attachment [true|false]] [--after ISO] [--before ISO] [--limit 25] [--cursor cur]
   shipmail inbox message <mailbox-id> <message-id>
   shipmail inbox security-review <mailbox-id> <message-id> --reason "Reviewed" --expected-content-sha256 HASH
@@ -842,15 +870,16 @@ Usage:
   shipmail inbox update-draft <mailbox-id> <thread-id> <draft-id> (--text "Hello" | --html "<p>Hello</p>")  (the new body replaces the old one)
   shipmail inbox delete-draft <mailbox-id> <thread-id> <draft-id>
   shipmail inbox send-draft <mailbox-id> <thread-id> <draft-id> [--expected-content-sha256 hash]
-  shipmail inbox reply-message <mailbox-id> <message-id> --to user@example.com (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
-  shipmail inbox reply-thread <mailbox-id> <thread-id> --to user@example.com (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
+  shipmail inbox reply-message <mailbox-id> <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
+  shipmail inbox reply-thread <mailbox-id> <thread-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
   shipmail inbox update <mailbox-id> <message-id> [--read true] [--starred false]
   shipmail inbox move <mailbox-id> <message-id> (--target-role archive | --target-folder-id fld)
   shipmail messages send (--mailbox-id mbx | --from 'Acme Support <hello@example.com>') --to user@example.com --subject "Hi" --text "Hello" [--track-reply true|false] [--sandbox-outcome delivered|bounced|complained] [--client-reference crm-123] [--metadata JSON|@file] [--source-rfc-message-id '<crm-123@example.com>'] [--header 'X-CRM-ID: 123']
+  shipmail messages send (--mailbox-id mbx | --from hello@example.com) --to user@example.com --template tpl_... [--template-version 2] [--var name=Ada ...]
   shipmail messages list (--mailbox-id mbx | --client-reference crm-123) [--limit 25] [--cursor cur]
   shipmail messages analytics [--updated-after ISO] [--updated-before ISO] [--limit 100] [--cursor cur]
   shipmail messages get <message-id>
-  shipmail messages reply <message-id> --to user@example.com (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--client-reference crm-reply-123]
+  shipmail messages reply <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--client-reference crm-reply-123]
   shipmail scheduled-messages list [--include-held] [--search text] [--limit 100]
   shipmail scheduled-messages get <message-id>
   shipmail scheduled-messages update <message-id> --to user@example.com --subject "Hi" --scheduled-at ISO (--text "Hello" | --html "<p>Hello</p>") [--staged-attachment-id sat_...]
@@ -865,6 +894,16 @@ Usage:
   shipmail suppressions add <email> [--scope all|marketing]
   shipmail suppressions list [--scope all|marketing] [--limit 25] [--cursor cur]
   shipmail suppressions remove <email>
+  shipmail templates list [--limit 25] [--cursor cur]
+  shipmail templates create --name "Welcome" --subject "Welcome, {{name}}" (--html "<p>Hi {{name}}</p>" | --text "Hi {{name}}") [--fallback name=there ...] [--publish]
+  shipmail templates get <template-id>
+  shipmail templates update <template-id> [--name "..."] [--subject "..."] [--html "..." | --clear-html] [--text "..." | --clear-text] [--fallback key=value ... | --clear-fallbacks]
+  shipmail templates delete <template-id>
+  shipmail templates publish <template-id>
+  shipmail templates render <template-id> [--var name=Ada ...] [--template-version 2]
+  shipmail templates versions <template-id> [--limit 25] [--cursor cur]
+  shipmail templates version <template-id> <version>
+  shipmail templates restore <template-id> <version>
   shipmail newsletters create \\
     --audience-id aud_123 \\
     --sender-identity-id nwsid_456 \\
@@ -939,6 +978,17 @@ One-off booking links:
   Revoking a link stops it at once and cannot be undone. Other flags: --description,
   --buffer-minutes, --minimum-notice-minutes, --conferencing-provider, --mailbox.
 
+Templates:
+  {{key}} in the subject, html or text is a variable. --html and --text take the value or @file.
+  --fallback key=value     Default for a variable. Repeat it. A variable without one is required
+                           at send time. On update, the given fallbacks replace all of them.
+  --publish                On create, also publish the draft as version 1.
+  update changes the draft; publish makes it the next version, which sends use. restore copies a
+  version into the draft without publishing it. render previews the draft, or --template-version.
+  messages send --template <id> sends the published version, or --template-version. --var
+  key=value sets a variable (repeat it; values are text). --subject, --html and --text are refused
+  with --template.
+
 Conversation IDs:
   <thread-id> accepts a conversation ID (thd_...) or the mail-server thread ID. Store the
   conversation_id every response carries. thread_id is deprecated and unchanged.
@@ -946,6 +996,11 @@ Conversation IDs:
 Member access output:
   role is owner, admin, or member. mailbox_access.scope is all or selected. mailbox_ids is empty
   for all; selected IDs may be limited to mailboxes the API key can reach.
+
+Member invitations and mailbox sharing:
+  Needs the members:write permission, which is never granted by default. The invitee receives an
+  email and creates their own account; no credential is returned. Without --all-mailboxes the
+  invitation shares only the --mailbox IDs. --newsletter-editor applies to the member role only.
 
 Newsletter styling:
   --styling-mode <styled|plain>  styled applies Shipmail's email theme. plain sends your HTML without injected styles, width, or centering, so the reader's email client styles it.
@@ -1210,26 +1265,19 @@ async function sendMessageParams(options: ParsedArgs["options"]): Promise<SendMe
   const cc = messageRecipients(options, "cc");
   const bcc = messageRecipients(options, "bcc");
   const replyTo = getString(options, "reply-to");
-  const subject = getRequiredString(options, "subject");
-  const text = getString(options, "text");
-  const html = getString(options, "html");
   const headers = outboundMessageHeaders(options);
   const metadata = await messageMetadata(options);
 
   if (!mailboxId && !from) throw new CliUsageError("Provide --mailbox-id or --from.");
   if (to.length === 0) throw new CliUsageError("Provide at least one --to recipient.");
-  if (!text && !html) throw new CliUsageError("Provide --text or --html.");
 
-  return {
+  const common = {
     ...(mailboxId ? { mailbox_id: mailboxId } : {}),
     ...(from ? { from } : {}),
     to,
     ...(cc.length > 0 ? { cc } : {}),
     ...(bcc.length > 0 ? { bcc } : {}),
     ...(replyTo ? { reply_to: replyTo } : {}),
-    subject,
-    ...(html ? { html } : {}),
-    ...(text ? { text } : {}),
     ...(getString(options, "client-reference")
       ? { client_reference: getString(options, "client-reference") }
       : {}),
@@ -1258,11 +1306,47 @@ async function sendMessageParams(options: ParsedArgs["options"]): Promise<SendMe
         }
       : {}),
   };
+
+  const templateId = getString(options, "template");
+  const templateVersion = getNumber(options, "template-version");
+  const variables = getKeyValues(options, "var");
+  if (templateId) {
+    for (const key of ["subject", "html", "text"] as const) {
+      if (optionValue(options, key) !== undefined) {
+        throw new CliUsageError(
+          `--${key} cannot be used with --template: the template supplies the subject and body.`,
+        );
+      }
+    }
+    return {
+      ...common,
+      template: {
+        id: templateId,
+        ...(templateVersion !== undefined ? { version: templateVersion } : {}),
+        ...(variables ? { variables } : {}),
+      },
+    };
+  }
+  if (templateVersion !== undefined || variables) {
+    throw new CliUsageError("--template-version and --var need --template.");
+  }
+
+  const subject = getRequiredString(options, "subject");
+  const text = getString(options, "text");
+  const html = getString(options, "html");
+  if (!text && !html) throw new CliUsageError("Provide --text or --html.");
+  return {
+    ...common,
+    subject,
+    ...(html ? { html } : {}),
+    ...(text ? { text } : {}),
+  };
 }
 
 async function replyToMessageParams(options: ParsedArgs["options"]): Promise<ReplyToMessageParams> {
   const to = messageRecipients(options, "to");
   const cc = messageRecipients(options, "cc");
+  const bcc = messageRecipients(options, "bcc");
   const text = getString(options, "text");
   const html = getString(options, "html");
   const headers = outboundMessageHeaders(options);
@@ -1272,6 +1356,7 @@ async function replyToMessageParams(options: ParsedArgs["options"]): Promise<Rep
   return {
     to,
     ...(cc.length > 0 ? { cc } : {}),
+    ...(bcc.length > 0 ? { bcc } : {}),
     ...(html ? { html } : {}),
     ...(text ? { text } : {}),
     ...(getString(options, "client-reference")
@@ -2266,12 +2351,77 @@ async function runMembers(client: ShipmailClient, parsed: ParsedArgs, out: Outpu
     return;
   }
 
+  if (subcommand === "invite") {
+    const idempotencyKey = getString(parsed.options, "idempotency-key");
+    writeJson(
+      out,
+      await client.members.invite(
+        inviteMemberParams(parsed),
+        idempotencyKey ? { idempotencyKey } : undefined,
+      ),
+    );
+    return;
+  }
+  if (subcommand === "invitations") {
+    const command = requirePositional(parsed.positional, 2, "invitations command");
+    if (command === "list") {
+      writeJson(out, await client.members.listInvitations());
+      return;
+    }
+    if (command === "cancel") {
+      const invitationId = requirePositional(parsed.positional, 3, "invitation id");
+      await client.members.cancelInvitation(invitationId);
+      writeJson(out, { ok: true, id: invitationId });
+      return;
+    }
+    throw new CliUsageError("Unknown members invitations command.");
+  }
+  if (subcommand === "mailboxes") {
+    const command = requirePositional(parsed.positional, 2, "mailboxes command");
+    const memberId = requirePositional(parsed.positional, 3, "member id");
+    const mailboxId = requirePositional(parsed.positional, 4, "mailbox id");
+    if (command === "grant") {
+      writeJson(out, await client.members.grantMailboxAccess(memberId, mailboxId));
+      return;
+    }
+    if (command === "revoke") {
+      writeJson(out, await client.members.revokeMailboxAccess(memberId, mailboxId));
+      return;
+    }
+    throw new CliUsageError("Unknown members mailboxes command.");
+  }
+
   const memberId = requirePositional(parsed.positional, 2, "member id");
   if (subcommand === "get") {
     writeJson(out, await client.members.get(memberId));
     return;
   }
   throw new CliUsageError("Unknown members command.");
+}
+
+const INVITATION_ROLES = ["admin", "member"] as const;
+
+function inviteMemberParams(parsed: ParsedArgs): InviteMemberParams {
+  const email = requirePositional(parsed.positional, 2, "email");
+  const rawRole = getRequiredString(parsed.options, "role");
+  const role = INVITATION_ROLES.find((candidate) => candidate === rawRole);
+  if (!role) throw new CliUsageError("--role must be admin or member.");
+  const allMailboxes = getBoolean(parsed.options, "all-mailboxes") === true;
+  const mailboxIds = getStringList(parsed.options, "mailbox");
+  if (allMailboxes && mailboxIds.length > 0) {
+    throw new CliUsageError("Use either --all-mailboxes or --mailbox, not both.");
+  }
+  const newsletterEditor = getBoolean(parsed.options, "newsletter-editor") === true;
+  if (newsletterEditor && role !== "member") {
+    throw new CliUsageError("--newsletter-editor applies to the member role only.");
+  }
+  return {
+    email,
+    role,
+    ...(allMailboxes ? { mailbox_access: "all" } : {}),
+    ...(mailboxIds.length > 0 ? { mailbox_ids: mailboxIds } : {}),
+    ...(newsletterEditor ? { newsletter_role: "editor" } : {}),
+  };
 }
 
 const SUPPRESSION_SCOPES = ["all", "marketing"] as const;
@@ -2311,6 +2461,149 @@ async function runSuppressions(
     return;
   }
   throw new CliUsageError("Unknown suppressions command.");
+}
+
+async function templateCreateParams(options: ParsedArgs["options"]): Promise<CreateTemplateParams> {
+  const html = await readTextInput(getString(options, "html"));
+  const text = await readTextInput(getString(options, "text"));
+  const fallbacks = getKeyValues(options, "fallback");
+  const publish = getBoolean(options, "publish");
+  if (!html && !text) throw new CliUsageError("Provide --html or --text.");
+  return {
+    name: getRequiredString(options, "name"),
+    subject: getRequiredString(options, "subject"),
+    ...(html ? { html } : {}),
+    ...(text ? { text } : {}),
+    ...(fallbacks ? { fallbacks } : {}),
+    ...(publish !== undefined ? { publish } : {}),
+  };
+}
+
+async function templateBodyUpdate(
+  options: ParsedArgs["options"],
+  key: "html" | "text",
+): Promise<string | null | undefined> {
+  const value = await readTextInput(getString(options, key));
+  const clear = getBoolean(options, `clear-${key}`) === true;
+  if (value !== undefined && clear) {
+    throw new CliUsageError(`Use either --${key} or --clear-${key}, not both.`);
+  }
+  return clear ? null : value;
+}
+
+async function templateUpdateParams(options: ParsedArgs["options"]): Promise<UpdateTemplateParams> {
+  const name = getString(options, "name");
+  const subject = getString(options, "subject");
+  const html = await templateBodyUpdate(options, "html");
+  const text = await templateBodyUpdate(options, "text");
+  const fallbacks = getKeyValues(options, "fallback");
+  const clearFallbacks = getBoolean(options, "clear-fallbacks") === true;
+  if (fallbacks && clearFallbacks) {
+    throw new CliUsageError("Use either --fallback or --clear-fallbacks, not both.");
+  }
+  const params: UpdateTemplateParams = {
+    ...(name !== undefined ? { name } : {}),
+    ...(subject !== undefined ? { subject } : {}),
+    ...(html !== undefined ? { html } : {}),
+    ...(text !== undefined ? { text } : {}),
+    ...(fallbacks ? { fallbacks } : clearFallbacks ? { fallbacks: {} } : {}),
+  };
+  if (
+    name === undefined &&
+    subject === undefined &&
+    html === undefined &&
+    text === undefined &&
+    params.fallbacks === undefined
+  ) {
+    throw new CliUsageError("Provide at least one field to change.");
+  }
+  return params;
+}
+
+function templateVersionPositional(positional: readonly string[]): number {
+  const raw = requirePositional(positional, 3, "version");
+  const version = Number(raw);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new CliUsageError("Version must be a positive integer.");
+  }
+  return version;
+}
+
+async function runTemplates(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(
+      out,
+      await client.templates.list({
+        cursor: getString(parsed.options, "cursor"),
+        limit: getNumber(parsed.options, "limit"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(out, await client.templates.create(await templateCreateParams(parsed.options)));
+    return;
+  }
+  const id = requirePositional(parsed.positional, 2, "template id");
+  if (subcommand === "get") {
+    writeJson(out, await client.templates.get(id));
+    return;
+  }
+  if (subcommand === "update") {
+    writeJson(out, await client.templates.update(id, await templateUpdateParams(parsed.options)));
+    return;
+  }
+  if (subcommand === "delete") {
+    await client.templates.delete(id);
+    writeJson(out, { ok: true, id });
+    return;
+  }
+  if (subcommand === "publish") {
+    writeJson(out, await client.templates.publish(id));
+    return;
+  }
+  if (subcommand === "render") {
+    const variables = getKeyValues(parsed.options, "var");
+    const version = getNumber(parsed.options, "template-version");
+    writeJson(
+      out,
+      await client.templates.render(id, {
+        ...(variables ? { variables } : {}),
+        ...(version !== undefined ? { version } : {}),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "versions") {
+    writeJson(
+      out,
+      await client.templates.listVersions(id, {
+        cursor: getString(parsed.options, "cursor"),
+        limit: getNumber(parsed.options, "limit"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "version") {
+    writeJson(
+      out,
+      await client.templates.getVersion(id, templateVersionPositional(parsed.positional)),
+    );
+    return;
+  }
+  if (subcommand === "restore") {
+    writeJson(
+      out,
+      await client.templates.restoreVersion(id, templateVersionPositional(parsed.positional)),
+    );
+    return;
+  }
+  throw new CliUsageError("Unknown templates command.");
 }
 
 const SUBSCRIBER_STATUS_VALUES = [
@@ -3419,6 +3712,12 @@ function writeError(err: unknown, errOut: Output): void {
         ? ` message_id=${shipmailError.messageId}`
         : "";
     errOut.write(`Error: ${shipmailError.message}${status}${requestId}${messageId}\n`);
+    if (shipmailError instanceof ValidationError) {
+      for (const detail of shipmailError.details ?? []) {
+        const code = detail.code ? ` (${detail.code})` : "";
+        errOut.write(`  ${detail.field}: ${detail.message}${code}\n`);
+      }
+    }
     // A refusal the organization owner can lift in Shipmail: print where, so a person or an agent
     // reading the output can pass the link on.
     if (shipmailError.actionUrl) {
@@ -3513,6 +3812,7 @@ export async function runCli(
     else if (command === "reply-scans") await runReplyScans(client, parsed, out);
     else if (command === "webhooks") await runWebhooks(client, parsed, out);
     else if (command === "suppressions") await runSuppressions(client, parsed, out);
+    else if (command === "templates") await runTemplates(client, parsed, out);
     else if (command === "newsletters") await runNewsletters(client, parsed, out);
     else if (command === "newsletter-assets")
       await runNewsletterAssets(client, parsed, out, options.fetch ?? globalThis.fetch);

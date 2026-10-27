@@ -92,6 +92,25 @@ describe("Messages", () => {
       expect(message.status).toBe("queued");
     });
 
+    test("sends a stored template with variables and a pinned version", async () => {
+      const client = createClient((input, init) => {
+        expect(new URL(String(input)).pathname).toBe("/v1/messages");
+        expect(JSON.parse(init?.body as string)).toEqual({
+          from: "hello@example.com",
+          to: ["user@example.com"],
+          template: { id: "tpl_123", version: 2, variables: { name: "Ada", count: 3 } },
+        });
+        return Response.json(mockMessage);
+      });
+
+      const message = await client.messages.send({
+        from: "hello@example.com",
+        to: ["user@example.com"],
+        template: { id: "tpl_123", version: 2, variables: { name: "Ada", count: 3 } },
+      });
+      expect(message.id).toBe("msg_123");
+    });
+
     test("sends with mailbox_id (legacy)", async () => {
       const client = createClient((input, init) => {
         const body = JSON.parse(init?.body as string);

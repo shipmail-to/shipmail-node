@@ -20,6 +20,7 @@ export const API_KEY_SCOPES = [
   "mailbox_rules:read",
   "mailbox_rules:write",
   "members:read",
+  "members:write",
   "messages:read",
   "messages:review",
   "messages:write",
@@ -33,6 +34,8 @@ export const API_KEY_SCOPES = [
   "webhooks:write",
   "suppressions:read",
   "suppressions:write",
+  "templates:read",
+  "templates:write",
 ] as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
@@ -61,6 +64,8 @@ export const API_KEY_SCOPE_DESCRIPTIONS: Readonly<Record<ApiKeyScope, string>> =
   "mailbox_rules:read": "List deterministic server-side rules for allowed mailboxes.",
   "mailbox_rules:write": "Create, replace, and remove deterministic rules for allowed mailboxes.",
   "members:read": "List and retrieve organization members.",
+  "members:write":
+    "Invite people, cancel invitations, and share or unshare mailboxes with members.",
   "messages:read": "List and retrieve messages.",
   "messages:review": "Inspect and release messages held by API-agent security review.",
   "messages:write": "Update, move, delete, and inject sandbox messages.",
@@ -74,6 +79,8 @@ export const API_KEY_SCOPE_DESCRIPTIONS: Readonly<Record<ApiKeyScope, string>> =
   "webhooks:write": "Create, update, delete, test, and rotate webhooks.",
   "suppressions:read": "List suppressed recipient addresses.",
   "suppressions:write": "Remove addresses from the suppression list.",
+  "templates:read": "List, retrieve, and render email templates and their versions.",
+  "templates:write": "Create, update, publish, restore, and delete email templates.",
 };
 
 export function isApiKeyScope(value: string): value is ApiKeyScope {

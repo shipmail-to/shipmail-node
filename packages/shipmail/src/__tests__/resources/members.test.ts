@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { ShipmailClient } from "../../client.js";
 import type { PaginatedResponse } from "../../types/common.js";
-import type { Member, MemberRole } from "../../types/member.js";
+import type { Invitation, Member, MemberRole } from "../../types/member.js";
 
 function createClient(
   handler: (input: string | URL | Request, init?: RequestInit) => Response | Promise<Response>,
@@ -92,5 +92,82 @@ describe("Members", () => {
       members.push(member);
     }
     expect(members).toEqual([mockMember]);
+  });
+
+  test("lists pending invitations", async () => {
+    const invitation: Invitation = {
+      object: "invitation",
+      id: "inv_bob",
+      email: "bob@acme.com",
+      role: "member",
+      mailbox_access: { scope: "selected", mailbox_ids: ["mbx_support"] },
+      newsletter_role: "editor",
+      created_at: "2026-10-27T00:00:00Z",
+      expires_at: "2026-11-03T00:00:00Z",
+    };
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("GET");
+      expect(new URL(String(input)).pathname).toBe("/v1/members/invitations");
+      return Response.json({ data: [invitation] });
+    });
+
+    const result = await client.members.listInvitations();
+    expect(result.data).toEqual([invitation]);
+  });
+
+  test("invites a person with an idempotency key", async () => {
+    const invitation: Invitation = {
+      object: "invitation",
+      id: "inv_carol",
+      email: "carol@acme.com",
+      role: "admin",
+      mailbox_access: { scope: "all", mailbox_ids: [] },
+      newsletter_role: null,
+      created_at: "2026-10-27T00:00:00Z",
+      expires_at: null,
+    };
+    const client = createClient(async (input, init) => {
+      expect(init?.method).toBe("POST");
+      expect(new URL(String(input)).pathname).toBe("/v1/members/invitations");
+      expect(new Headers(init?.headers).get("idempotency-key")).toBe("invite-carol");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        email: "carol@acme.com",
+        role: "admin",
+        mailbox_access: "all",
+      });
+      return Response.json(invitation, { status: 201 });
+    });
+
+    const result = await client.members.invite(
+      { email: "carol@acme.com", role: "admin", mailbox_access: "all" },
+      { idempotencyKey: "invite-carol" },
+    );
+    expect(result).toEqual(invitation);
+  });
+
+  test("cancels an invitation", async () => {
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("DELETE");
+      expect(new URL(String(input)).pathname).toBe("/v1/members/invitations/inv_bob");
+      return new Response(null, { status: 204 });
+    });
+
+    await expect(client.members.cancelInvitation("inv_bob")).resolves.toBeUndefined();
+  });
+
+  test("shares and unshares a mailbox with a member", async () => {
+    const calls: string[] = [];
+    const client = createClient((input, init) => {
+      calls.push(`${init?.method} ${new URL(String(input)).pathname}`);
+      expect(init?.body).toBeNull();
+      return Response.json(mockMember);
+    });
+
+    expect(await client.members.grantMailboxAccess("mem_alice", "mbx_sales")).toEqual(mockMember);
+    expect(await client.members.revokeMailboxAccess("mem_alice", "mbx_sales")).toEqual(mockMember);
+    expect(calls).toEqual([
+      "PUT /v1/members/mem_alice/mailboxes/mbx_sales",
+      "DELETE /v1/members/mem_alice/mailboxes/mbx_sales",
+    ]);
   });
 });

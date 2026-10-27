@@ -251,6 +251,13 @@ describe("URL path encoding (defense-in-depth)", () => {
     expect(new URL(cap.url()).pathname).toBe("/v1/members/a%2Fb");
   });
 
+  test("members.grantMailboxAccess encodes both ids", async () => {
+    const cap = captureUrl();
+    const client = createClient(cap.handler);
+    await client.members.grantMailboxAccess("a/b", "../c").catch(() => undefined);
+    expect(new URL(cap.url()).pathname).toBe("/v1/members/a%2Fb/mailboxes/..%2Fc");
+  });
+
   test("messages.reply encodes id and preserves /reply suffix", async () => {
     const cap = captureUrl();
     const client = createClient(cap.handler);

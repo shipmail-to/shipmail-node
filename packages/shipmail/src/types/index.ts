@@ -230,6 +230,10 @@ export type {
   UpdateMailboxRulesParams,
 } from "./mailbox.js";
 export type {
+  Invitation,
+  InvitationList,
+  InvitationRole,
+  InviteMemberParams,
   ListMembersParams,
   Member,
   MemberMailboxAccess,
@@ -326,6 +330,19 @@ export type {
   SuppressionReason,
   SuppressionScope,
 } from "./suppression.js";
+export type {
+  CreateTemplateParams,
+  ListTemplatesParams,
+  ListTemplateVersionsParams,
+  RenderedTemplate,
+  RenderTemplateParams,
+  SendMessageTemplate,
+  Template,
+  TemplateVariable,
+  TemplateVariableValues,
+  TemplateVersion,
+  UpdateTemplateParams,
+} from "./template.js";
 export type { GetThreadParams, ListThreadsParams, ReplyToThreadParams, Thread } from "./thread.js";
 export type {
   CreateWebhookParams,

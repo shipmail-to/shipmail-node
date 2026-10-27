@@ -149,6 +149,20 @@ shipmail audiences welcome add-step aud_123 --subject "Welcome" --markdown @welc
 shipmail audiences welcome add-step aud_123 --subject "Our best posts" --markdown @day-3.md --wait-minutes 4320
 shipmail audiences welcome enable aud_123
 
+# Store a template, publish it, then send it by ID
+shipmail templates create \
+  --name "Welcome" \
+  --subject "Welcome, {{name}}" \
+  --html @welcome.html \
+  --fallback plan=Free \
+  --publish
+shipmail templates render tpl_123 --var name=Ada
+shipmail messages send --from hello@example.com --to ada@example.com --template tpl_123 --var name=Ada
+shipmail templates update tpl_123 --subject "Welcome aboard, {{name}}"
+shipmail templates publish tpl_123
+shipmail templates versions tpl_123
+shipmail templates restore tpl_123 1
+
 # Manage webhooks
 shipmail webhooks create \
   --url https://example.com/shipmail/webhook \
@@ -169,6 +183,11 @@ sanitized inline HTML. Use `<p>` and `<br>` for line breaks. Shipmail keeps `a`,
 Shipmail converts headings, paragraphs, lists, quotes, code, images, links, dividers and tables
 to blocks. A callout starts with a line `:::callout` (optionally `info`, `warning` or `success`,
 then a title) and ends with a line `:::`.
+
+With `messages send --template`, the template supplies the subject and body, so `--subject`,
+`--html` and `--text` are refused. `--var key=value` sets a variable (repeat it; values are text),
+and `--template-version` pins a version instead of the published one. A send missing a required
+variable fails with HTTP 422 and prints each detail with its code, such as `missing_variable`.
 
 `newsletter-assets upload` uses a five-minute direct storage PUT, then calls the single-use
 completion URL. Video uploads require a JPEG poster through `--thumbnail`. `newsletter-assets list`
@@ -191,7 +210,9 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 - `api <METHOD> <PATH>`
 - `domains list|search|create|get|verify|delete`
 - `mailboxes list|create|get|update|suspend|resume|forwarding|forwarding-add|forwarding-remove|app-passwords|folders|identities|stage-attachment|prepare-attachment-upload`
-- `members list|get`
+- `members list|get|invite`
+- `members invitations list|cancel`
+- `members mailboxes grant|revoke`
 - `inbox list|message|security-review|threads|thread|thread-state|draft|send-draft|reply-message|reply-thread|update|move`
 - `reply-scans create|status|results`
 - `messages send|list|analytics|get|reply` (test keys also support `--sandbox-outcome`)
@@ -199,6 +220,7 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 - `mailboxes sandbox-inbound`
 - `webhooks list|create|update|test|deliveries|replay-delivery`
 - `suppressions add|list|remove`
+- `templates list|create|get|update|delete|publish|render|versions|version|restore` (`messages send --template` sends one)
 - `audiences list|create|get|update|delete`
 - `audiences feed get|update|rotate|revoke`
 - `audiences welcome get|enable|disable|add-step|update-step|remove-step`
@@ -211,6 +233,15 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 Member output uses the roles `owner`, `admin`, and `member`. Its `mailbox_access.scope` is `all` or
 `selected`; `mailbox_ids` is empty for `all`, while selected IDs may be limited to mailboxes the
 API key can reach.
+
+`members invite`, `members invitations cancel` and `members mailboxes grant|revoke` need the
+`members:write` permission, which no preset includes. The invitee receives an email and creates
+their own account; the CLI never receives their credentials:
+
+```bash
+shipmail members invite sam@example.com --role member --mailbox mbx_support --newsletter-editor
+shipmail members mailboxes grant mem_sam mbx_sales
+```
 
 Configure a publisher-owned Atom self URL and the number of recent newsletters:
 

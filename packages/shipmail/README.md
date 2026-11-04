@@ -19,6 +19,7 @@ Official TypeScript SDK for the [Shipmail](https://shipmail.to) API. Zero runtim
 - [Mailboxes](#mailboxes)
 - [Messages](#messages)
 - [Templates](#templates)
+- [SMTP credentials](#smtp-credentials)
 - [Scheduled messages and attachments](#scheduled-messages-and-attachments)
 - [Sandbox](#sandbox)
 - [Threads](#threads)
@@ -323,6 +324,22 @@ a required variable left out, or a variable the template does not use fails with
 `ValidationError`, whose `details[].code` is `template_not_published`, `missing_variable` or
 `unknown_variable`.
 
+## SMTP credentials
+
+An SMTP credential sends as one transactional sender's address from any SMTP client, such as Supabase Auth or a framework mailer. Messages it sends count as transactional email, like `messages.send` from that sender. A sender has at most 5 credentials.
+
+```ts
+const credential = await shipmail.smtpCredentials.create({
+  from: "notifications@notify.example.com",
+  name: "Supabase Auth",
+});
+console.log(credential.host, credential.ports, credential.username, credential.password);
+await shipmail.smtpCredentials.list({ from: "notifications@notify.example.com" });
+await shipmail.smtpCredentials.revoke(credential.id);
+```
+
+`password` appears only in the `create` response. `create` refuses an `idempotencyKey`.
+
 ## Scheduled messages and attachments
 
 Stage raw files up to 25 MB, then reference their opaque IDs from send or scheduled-update calls.
@@ -486,7 +503,15 @@ org.sending_suspended
 org.reputation_recovered
 reply.overdue
 conversation.needs_action
+conversation.reply_target_at_risk
+conversation.reply_target_missed
 calendar.event_starting
+calendar.event_started
+calendar.event_ended
+calendar.event_created
+calendar.event_updated
+calendar.event_cancelled
+calendar.rsvp_updated
 booking.created
 subscriber.added
 newsletter.sent

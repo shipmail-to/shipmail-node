@@ -69,6 +69,11 @@ shipmail messages list --client-reference crm-123
 shipmail messages analytics --updated-after 2026-07-01T00:00:00Z --limit 100
 shipmail messages reply msg_123 --to user@example.com --text "Thanks"
 
+# SMTP credentials for a transactional sender (the password is printed once)
+shipmail smtp-credentials create --from notifications@notify.example.com --name "Supabase Auth"
+shipmail smtp-credentials list --from notifications@notify.example.com
+shipmail smtp-credentials revoke smtpc_123
+
 # Stage a raw file, then pass the returned sat_... ID when sending
 shipmail mailboxes stage-attachment mbx_123 ./invoice.pdf --content-type application/pdf
 
@@ -149,6 +154,11 @@ shipmail audiences welcome add-step aud_123 --subject "Welcome" --markdown @welc
 shipmail audiences welcome add-step aud_123 --subject "Our best posts" --markdown @day-3.md --wait-minutes 4320
 shipmail audiences welcome enable aud_123
 
+# Save a group of subscribers, then target it with segment_id
+shipmail audiences segments create aud_123 --name "Founders" \
+  --definition '{"match":"all","rules":[{"kind":"merge_field","field":"role","operator":"equals","value":"founder"}]}'
+shipmail audiences segments list aud_123
+
 # Store a template, publish it, then send it by ID
 shipmail templates create \
   --name "Welcome" \
@@ -219,12 +229,14 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 - `scheduled-messages list|get|update|cancel`
 - `mailboxes sandbox-inbound`
 - `webhooks list|create|update|test|deliveries|replay-delivery`
+- `smtp-credentials list|create|revoke`
 - `suppressions add|list|remove`
 - `templates list|create|get|update|delete|publish|render|versions|version|restore` (`messages send --template` sends one)
 - `audiences list|create|get|update|delete`
 - `audiences feed get|update|rotate|revoke`
 - `audiences welcome get|enable|disable|add-step|update-step|remove-step`
-- `audiences subscribers add|list|get|by-email|update|unsubscribe|resubscribe|remove`
+- `audiences segments list|create|get|update|delete`
+- `audiences subscribers add|list|get|by-email|update|unsubscribe|resubscribe|resend-confirmation|remove`
 - `newsletter-sender-identities list`
 - `newsletter-domains list`
 - `newsletters create|update|preview|preflight|test-send|schedule|cancel|resume`

@@ -119,6 +119,27 @@ export type ResubscribeSubscriberParams = {
   readonly consent_source: string;
 };
 
+export type ResendSubscriberConfirmationParams = {
+  readonly subscriber_ids?: readonly string[] | undefined;
+};
+
+export type ConfirmationResendSkipped = {
+  readonly not_found: number;
+  readonly not_pending: number;
+  readonly too_old: number;
+  readonly resend_limit: number;
+  readonly recently_sent: number;
+};
+
+export type ConfirmationResend = {
+  readonly object: "confirmation_resend";
+  readonly audience_id: string;
+  readonly sent: number;
+  readonly failed: number;
+  readonly skipped: ConfirmationResendSkipped;
+  readonly remaining: number;
+};
+
 export type SubscriberResult = {
   readonly email_address: string;
   readonly outcome: SubscriberOutcome;

@@ -31,5 +31,6 @@ export type ReplyToThreadParams = {
   readonly bcc?: readonly EmailRecipientInput[] | undefined;
   readonly scheduled_at?: string | undefined;
   readonly track_reply?: boolean | undefined;
+  readonly add_signature?: boolean | undefined;
   readonly sandbox_outcome?: SandboxOutcome | undefined;
 };

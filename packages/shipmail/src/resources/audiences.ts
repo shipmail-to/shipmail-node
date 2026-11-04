@@ -7,9 +7,11 @@ import type {
   AddSubscribersBatchResult,
   Audience,
   AudienceFeed,
+  ConfirmationResend,
   CreateAudienceParams,
   ListAudiencesParams,
   ListSubscribersParams,
+  ResendSubscriberConfirmationParams,
   ResubscribeSubscriberParams,
   Subscriber,
   SubscriberResult,
@@ -18,6 +20,12 @@ import type {
   UpdateSubscriberParams,
 } from "../types/audience.js";
 import type { MethodOptions, PaginatedResponse } from "../types/common.js";
+import type {
+  CreateSegmentParams,
+  ListSegmentsResponse,
+  Segment,
+  UpdateSegmentParams,
+} from "../types/segment.js";
 import type {
   CreateWelcomeStepParams,
   DeletedWelcomeStep,
@@ -140,6 +148,63 @@ class WelcomeSequences extends ApiResource {
   }
 }
 
+function segmentsBase(audienceId: string): string {
+  return `/audiences/${encodeURIComponent(audienceId)}/segments`;
+}
+
+class Segments extends ApiResource {
+  list(audienceId: string, options?: MethodOptions): Promise<ListSegmentsResponse> {
+    return this.client.request<ListSegmentsResponse>({
+      method: "GET",
+      path: segmentsBase(audienceId),
+      methodOptions: options,
+    });
+  }
+
+  create(
+    audienceId: string,
+    params: CreateSegmentParams,
+    options?: MethodOptions,
+  ): Promise<Segment> {
+    return this.client.request<Segment>({
+      method: "POST",
+      path: segmentsBase(audienceId),
+      body: params,
+      methodOptions: options,
+    });
+  }
+
+  get(audienceId: string, segmentId: string, options?: MethodOptions): Promise<Segment> {
+    return this.client.request<Segment>({
+      method: "GET",
+      path: `${segmentsBase(audienceId)}/${encodeURIComponent(segmentId)}`,
+      methodOptions: options,
+    });
+  }
+
+  update(
+    audienceId: string,
+    segmentId: string,
+    params: UpdateSegmentParams,
+    options?: MethodOptions,
+  ): Promise<Segment> {
+    return this.client.request<Segment>({
+      method: "PATCH",
+      path: `${segmentsBase(audienceId)}/${encodeURIComponent(segmentId)}`,
+      body: params,
+      methodOptions: options,
+    });
+  }
+
+  delete(audienceId: string, segmentId: string, options?: MethodOptions): Promise<void> {
+    return this.client.request<void>({
+      method: "DELETE",
+      path: `${segmentsBase(audienceId)}/${encodeURIComponent(segmentId)}`,
+      methodOptions: options,
+    });
+  }
+}
+
 class Subscribers extends ApiResource {
   add(
     audienceId: string,
@@ -252,6 +317,19 @@ class Subscribers extends ApiResource {
     });
   }
 
+  resendConfirmation(
+    audienceId: string,
+    params?: ResendSubscriberConfirmationParams,
+    options?: MethodOptions,
+  ): Promise<ConfirmationResend> {
+    return this.client.request<ConfirmationResend>({
+      method: "POST",
+      path: `${base(audienceId)}/resend-confirmation`,
+      body: params ?? {},
+      methodOptions: options,
+    });
+  }
+
   remove(audienceId: string, subscriberId: string, options?: MethodOptions): Promise<void> {
     return this.client.request<void>({
       method: "DELETE",
@@ -263,12 +341,14 @@ class Subscribers extends ApiResource {
 
 export class Audiences extends ApiResource {
   readonly feeds: AudienceFeeds;
+  readonly segments: Segments;
   readonly subscribers: Subscribers;
   readonly welcomeSequence: WelcomeSequences;
 
   constructor(client: ShipmailClient) {
     super(client);
     this.feeds = new AudienceFeeds(client);
+    this.segments = new Segments(client);
     this.subscribers = new Subscribers(client);
     this.welcomeSequence = new WelcomeSequences(client);
   }

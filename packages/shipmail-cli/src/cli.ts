@@ -33,6 +33,7 @@ import {
   ReconciliationRequiredError,
   type Reminder,
   type ReplyToMessageParams,
+  type SegmentDefinition,
   type SendMessageParams,
   ShipmailClient,
   type ShipmailConfig,
@@ -48,6 +49,7 @@ import {
   type UpdateTemplateParams,
   type UpdateWebhookParams,
   type UpdateWelcomeStepParams,
+  type UpsertCustomerParams,
   ValidationError,
   WEBHOOK_EVENT_TYPES,
   type WebhookEventType,
@@ -570,6 +572,27 @@ function parseStylingMode(
   throw new CliUsageError("--styling-mode must be styled or plain.");
 }
 
+// Checks the envelope; the API validates each rule.
+function isSegmentDefinition(value: unknown): value is SegmentDefinition {
+  return (
+    isJsonObject(value) &&
+    (value["match"] === "all" || value["match"] === "any") &&
+    Array.isArray(value["rules"]) &&
+    value["rules"].length > 0 &&
+    value["rules"].every((rule) => isJsonObject(rule) && typeof rule["kind"] === "string")
+  );
+}
+
+async function segmentDefinition(value: string | undefined): Promise<SegmentDefinition> {
+  const parsed = await readJsonInput(value);
+  if (!isSegmentDefinition(parsed)) {
+    throw new CliUsageError(
+      '--definition must be a JSON object with match ("all" or "any") and a non-empty rules array.',
+    );
+  }
+  return parsed;
+}
+
 async function automationDefinition(value: string | undefined): Promise<AutomationDefinition> {
   const parsed = await readJsonInput(value);
   if (!isAutomationDefinition(parsed)) {
@@ -870,16 +893,17 @@ Usage:
   shipmail inbox update-draft <mailbox-id> <thread-id> <draft-id> (--text "Hello" | --html "<p>Hello</p>")  (the new body replaces the old one)
   shipmail inbox delete-draft <mailbox-id> <thread-id> <draft-id>
   shipmail inbox send-draft <mailbox-id> <thread-id> <draft-id> [--expected-content-sha256 hash]
-  shipmail inbox reply-message <mailbox-id> <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
-  shipmail inbox reply-thread <mailbox-id> <thread-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false]
+  shipmail inbox reply-message <mailbox-id> <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--add-signature]
+  shipmail inbox reply-thread <mailbox-id> <thread-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--add-signature]
   shipmail inbox update <mailbox-id> <message-id> [--read true] [--starred false]
   shipmail inbox move <mailbox-id> <message-id> (--target-role archive | --target-folder-id fld)
-  shipmail messages send (--mailbox-id mbx | --from 'Acme Support <hello@example.com>') --to user@example.com --subject "Hi" --text "Hello" [--track-reply true|false] [--sandbox-outcome delivered|bounced|complained] [--client-reference crm-123] [--metadata JSON|@file] [--source-rfc-message-id '<crm-123@example.com>'] [--header 'X-CRM-ID: 123']
+  shipmail messages send (--mailbox-id mbx | --from 'Acme Support <hello@example.com>') --to user@example.com --subject "Hi" --text "Hello" [--track-reply true|false] [--add-signature] [--sandbox-outcome delivered|bounced|complained] [--client-reference crm-123] [--metadata JSON|@file] [--source-rfc-message-id '<crm-123@example.com>'] [--header 'X-CRM-ID: 123']
   shipmail messages send (--mailbox-id mbx | --from hello@example.com) --to user@example.com --template tpl_... [--template-version 2] [--var name=Ada ...]
   shipmail messages list (--mailbox-id mbx | --client-reference crm-123) [--limit 25] [--cursor cur]
   shipmail messages analytics [--updated-after ISO] [--updated-before ISO] [--limit 100] [--cursor cur]
   shipmail messages get <message-id>
-  shipmail messages reply <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--client-reference crm-reply-123]
+  shipmail messages reply <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--add-signature] [--client-reference crm-reply-123]
+  shipmail messages invitation respond <message-id> --response accepted|tentative|declined
   shipmail scheduled-messages list [--include-held] [--search text] [--limit 100]
   shipmail scheduled-messages get <message-id>
   shipmail scheduled-messages update <message-id> --to user@example.com --subject "Hi" --scheduled-at ISO (--text "Hello" | --html "<p>Hello</p>") [--staged-attachment-id sat_...]
@@ -891,9 +915,20 @@ Usage:
   shipmail webhooks create --url https://example.com/hook --events message.received,message.bounced [--authorization "Bearer key"] [--standard-webhooks-secret whsec_...] [--include-reply-text] [--authenticated-senders-only] [--allowed-sender jane@customer.com --allowed-sender customer.com]
   shipmail webhooks update <webhook-id> [--url https://example.com/hook] [--events message.received] [--description text] [--active true|false] [--authorization "Bearer key" | --clear-authorization] [--standard-webhooks-secret whsec_... | --clear-standard-webhooks-secret] [--include-reply-text true|false] [--authenticated-senders-only true|false] [--allowed-sender customer.com ... | --clear-allowed-senders]
   shipmail webhooks replay-delivery <webhook-id> <delivery-id> [--idempotency-key key]
+  shipmail smtp-credentials list [--from notifications@notify.example.com]
+  shipmail smtp-credentials create --from notifications@notify.example.com --name "Supabase Auth"  (prints the password once)
+  shipmail smtp-credentials revoke <smtp-credential-id>
   shipmail suppressions add <email> [--scope all|marketing]
-  shipmail suppressions list [--scope all|marketing] [--limit 25] [--cursor cur]
+  shipmail suppressions list [--scope all|marketing|transactional|mailbox] [--limit 25] [--cursor cur]
   shipmail suppressions remove <email>
+  shipmail customers list [--email jane@acme.com | --domain acme.com | --external-source hubspot --external-id 42 | --q text] [--tag vip] [--limit 25] [--cursor cur]
+  shipmail customers get <customer-id>
+  shipmail customers create [--name "Jane Doe"] [--company Acme] [--notes text] [--service-level-id svl_...] [--email jane@acme.com ...] [--domain acme.com ...] [--fields JSON|@file] [--tag vip ...]
+  shipmail customers update <customer-id> [--name ...] [--company ...] [--notes ...] [--service-level-id svl_... | --clear-service-level] [--email ... --domain ...] [--fields JSON|@file] [--tag vip ... | --clear-tags]  (--email and --domain replace all identifiers; --tag replaces all tags)
+  shipmail customers upsert <source> <external-id> [--url https://crm.example.com/42] [same flags as update]  (creates or updates the customer that system knows by that id)
+  shipmail customers delete <customer-id>
+  shipmail customers reply-times
+  shipmail customers fields
   shipmail templates list [--limit 25] [--cursor cur]
   shipmail templates create --name "Welcome" --subject "Welcome, {{name}}" (--html "<p>Hi {{name}}</p>" | --text "Hi {{name}}") [--fallback name=there ...] [--publish]
   shipmail templates get <template-id>
@@ -938,6 +973,11 @@ Usage:
   shipmail audiences welcome add-step <audience-id> --subject "Welcome" (--markdown @welcome.md | --blocks @blocks.json) [--wait-minutes 0] [--preview-text "..."] [--sender-identity-id nwsid_456]
   shipmail audiences welcome update-step <audience-id> <step-id> [--subject "..."] [--markdown @welcome.md | --blocks @blocks.json] [--wait-minutes 1440]
   shipmail audiences welcome remove-step <audience-id> <step-id>
+  shipmail audiences segments list <audience-id>
+  shipmail audiences segments create <audience-id> --name "Founders" --definition JSON|@segment.json [--idempotency-key key]
+  shipmail audiences segments get <audience-id> <segment-id>
+  shipmail audiences segments update <audience-id> <segment-id> [--name "..."] [--definition JSON|@segment.json]
+  shipmail audiences segments delete <audience-id> <segment-id>
   shipmail audiences subscribers add <audience-id> <email> [--name "Jane"] [--consent-source "..."]
   shipmail audiences subscribers list <audience-id> [--status subscribed] [--email jane@x.com] [--limit 25]
   shipmail audiences subscribers get <audience-id> <subscriber-id>
@@ -945,6 +985,7 @@ Usage:
   shipmail audiences subscribers update <audience-id> <subscriber-id> [--name "..."]
   shipmail audiences subscribers unsubscribe <audience-id> <subscriber-id>
   shipmail audiences subscribers resubscribe <audience-id> <subscriber-id> --consent-source "Signup form"
+  shipmail audiences subscribers resend-confirmation <audience-id> [--subscriber <subscriber-id> ...]
   shipmail audiences subscribers remove <audience-id> <subscriber-id>
   shipmail calendar events list --mailbox hello@example.com --from 2026-08-01T00:00:00Z --to 2026-08-08T00:00:00Z [--expand true] [--limit 100]
   shipmail calendar events create --mailbox hello@example.com --title "Sync" --start 2026-08-01T14:00:00 [--timezone Europe/Paris] [--duration PT30M] [--invitation-language en|fr|es] [--attendees JSON|@file] [--reminders JSON|@file] [--operation-key key] [--send-invitations true|false]
@@ -987,7 +1028,8 @@ Templates:
   version into the draft without publishing it. render previews the draft, or --template-version.
   messages send --template <id> sends the published version, or --template-version. --var
   key=value sets a variable (repeat it; values are text). --subject, --html and --text are refused
-  with --template.
+  with --template. A transactional sender refuses --staged-attachment-id, and an email it sends can
+  be up to 10 MB, encoding included.
 
 Conversation IDs:
   <thread-id> accepts a conversation ID (thd_...) or the mail-server thread ID. Store the
@@ -1026,6 +1068,10 @@ List cleanup:
 
 Newsletter block prose:
   Paragraph, quote, callout, list-item, and column bodies accept bare text or sanitized inline HTML. Use <p> and <br> for line breaks.
+
+Audience segments:
+  --definition <JSON|@file>  {"match":"all"|"any","rules":[...]} with 1 to 10 rules, for example {"kind":"merge_field","field":"role","operator":"equals","value":"founder"}. Rule kinds: merge_field, join_date, engagement_tier, last_sign_of_life, issues_received.
+  A segment's id is the segment_id a newsletter block's visibility takes. Delete is refused while a newsletter sends to the segment.
 
 Newsletter feeds:
   --feed-entry-url <url>  Link this newsletter's Atom feed title to an http(s) URL instead of its Shipmail archive.
@@ -1296,6 +1342,10 @@ async function sendMessageParams(options: ParsedArgs["options"]): Promise<SendMe
       const trackReply = getBoolean(options, "track-reply");
       return trackReply === undefined ? {} : { track_reply: trackReply };
     })(),
+    ...(() => {
+      const addSignature = getBoolean(options, "add-signature");
+      return addSignature === undefined ? {} : { add_signature: addSignature };
+    })(),
     ...(getString(options, "sandbox-outcome")
       ? {
           sandbox_outcome: getEnum(options, "sandbox-outcome", [
@@ -1373,6 +1423,10 @@ async function replyToMessageParams(options: ParsedArgs["options"]): Promise<Rep
     ...(() => {
       const trackReply = getBoolean(options, "track-reply");
       return trackReply === undefined ? {} : { track_reply: trackReply };
+    })(),
+    ...(() => {
+      const addSignature = getBoolean(options, "add-signature");
+      return addSignature === undefined ? {} : { add_signature: addSignature };
     })(),
     ...(getString(options, "sandbox-outcome")
       ? {
@@ -2197,6 +2251,24 @@ async function runMessages(client: ShipmailClient, parsed: ParsedArgs, out: Outp
     );
     return;
   }
+  if (subcommand === "invitation" && parsed.positional[2] === "respond") {
+    const response = getEnum(parsed.options, "response", [
+      "accepted",
+      "tentative",
+      "declined",
+    ] as const);
+    if (!response) {
+      throw new CliUsageError("--response must be one of: accepted, tentative, declined.");
+    }
+    writeJson(
+      out,
+      await client.messages.respondToInvitation(
+        requirePositional(parsed.positional, 3, "message id"),
+        { response },
+      ),
+    );
+    return;
+  }
   if (subcommand === "get") {
     writeJson(
       out,
@@ -2424,7 +2496,37 @@ function inviteMemberParams(parsed: ParsedArgs): InviteMemberParams {
   };
 }
 
-const SUPPRESSION_SCOPES = ["all", "marketing"] as const;
+async function runSmtpCredentials(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(out, await client.smtpCredentials.list({ from: getString(parsed.options, "from") }));
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(
+      out,
+      await client.smtpCredentials.create({
+        from: getRequiredString(parsed.options, "from"),
+        name: getRequiredString(parsed.options, "name"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "revoke") {
+    const id = requirePositional(parsed.positional, 2, "SMTP credential id");
+    await client.smtpCredentials.revoke(id);
+    writeJson(out, { ok: true, id });
+    return;
+  }
+  throw new CliUsageError("Unknown smtp-credentials command.");
+}
+
+const SUPPRESSION_SCOPES = ["all", "marketing", "transactional", "mailbox"] as const;
+const CREATE_SUPPRESSION_SCOPES = ["all", "marketing"] as const;
 
 async function runSuppressions(
   client: ShipmailClient,
@@ -2433,7 +2535,7 @@ async function runSuppressions(
 ): Promise<void> {
   const subcommand = parsed.positional[1];
   if (subcommand === "add") {
-    const scope = getEnum(parsed.options, "scope", SUPPRESSION_SCOPES);
+    const scope = getEnum(parsed.options, "scope", CREATE_SUPPRESSION_SCOPES);
     writeJson(
       out,
       await client.suppressions.create({
@@ -2461,6 +2563,131 @@ async function runSuppressions(
     return;
   }
   throw new CliUsageError("Unknown suppressions command.");
+}
+
+function isCustomerFields(value: unknown): value is NonNullable<UpsertCustomerParams["fields"]> {
+  return (
+    isJsonObject(value) &&
+    Object.values(value).every(
+      (item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean",
+    )
+  );
+}
+
+// The profile flags shared by create, update and upsert. Only the flags given are sent.
+async function customerProfileParams(
+  options: ParsedArgs["options"],
+): Promise<UpsertCustomerParams> {
+  const emails = getStringList(options, "email");
+  const domains = getStringList(options, "domain");
+  const rawFields = getString(options, "fields");
+  const fields = rawFields === undefined ? undefined : await readJsonInput(rawFields);
+  if (fields !== undefined && !isCustomerFields(fields)) {
+    throw new CliUsageError(
+      "--fields must be a JSON object of string, number or boolean values, or @path/to/file.json.",
+    );
+  }
+  const serviceLevelId = getString(options, "service-level-id");
+  const clearServiceLevel = getBoolean(options, "clear-service-level") === true;
+  if (serviceLevelId !== undefined && clearServiceLevel) {
+    throw new CliUsageError("Use either --service-level-id or --clear-service-level, not both.");
+  }
+  const tagFlag = optionValue(options, "tag");
+  if (typeof tagFlag === "boolean") throw new CliUsageError("Missing value for --tag.");
+  const tags = tagFlag === undefined ? undefined : getStringList(options, "tag");
+  const clearTags = getBoolean(options, "clear-tags") === true;
+  if (tags !== undefined && clearTags) {
+    throw new CliUsageError("Use --tag or --clear-tags, not both.");
+  }
+  const name = getString(options, "name");
+  const company = getString(options, "company");
+  const notes = await readTextInput(getString(options, "notes"));
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(company !== undefined ? { company } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+    ...(serviceLevelId !== undefined ? { service_level_id: serviceLevelId } : {}),
+    ...(clearServiceLevel ? { service_level_id: null } : {}),
+    ...(fields !== undefined ? { fields } : {}),
+    ...(tags !== undefined ? { tags } : {}),
+    ...(clearTags ? { tags: [] } : {}),
+    ...(emails.length > 0 || domains.length > 0
+      ? {
+          identifiers: [
+            ...emails.map((value) => ({ kind: "email" as const, value })),
+            ...domains.map((value) => ({ kind: "domain" as const, value })),
+          ],
+        }
+      : {}),
+  };
+}
+
+async function runCustomers(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(
+      out,
+      await client.customers.list({
+        cursor: getString(parsed.options, "cursor"),
+        limit: getNumber(parsed.options, "limit"),
+        email: getString(parsed.options, "email"),
+        domain: getString(parsed.options, "domain"),
+        external_source: getString(parsed.options, "external-source"),
+        external_id: getString(parsed.options, "external-id"),
+        q: getString(parsed.options, "q"),
+        tag: getString(parsed.options, "tag"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "get") {
+    writeJson(
+      out,
+      await client.customers.get(requirePositional(parsed.positional, 2, "customer-id")),
+    );
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(out, await client.customers.create(await customerProfileParams(parsed.options)));
+    return;
+  }
+  if (subcommand === "update") {
+    const id = requirePositional(parsed.positional, 2, "customer-id");
+    writeJson(out, await client.customers.update(id, await customerProfileParams(parsed.options)));
+    return;
+  }
+  if (subcommand === "upsert") {
+    const source = requirePositional(parsed.positional, 2, "source");
+    const externalId = requirePositional(parsed.positional, 3, "external-id");
+    const url = getString(parsed.options, "url");
+    writeJson(
+      out,
+      await client.customers.upsertByExternalId(source, externalId, {
+        ...(await customerProfileParams(parsed.options)),
+        ...(url !== undefined ? { url } : {}),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "delete") {
+    const id = requirePositional(parsed.positional, 2, "customer-id");
+    await client.customers.remove(id);
+    writeJson(out, { ok: true, id });
+    return;
+  }
+  if (subcommand === "reply-times") {
+    writeJson(out, await client.customers.listServiceLevels());
+    return;
+  }
+  if (subcommand === "fields") {
+    writeJson(out, await client.customers.listFields());
+    return;
+  }
+  throw new CliUsageError("Unknown customers command.");
 }
 
 async function templateCreateParams(options: ParsedArgs["options"]): Promise<CreateTemplateParams> {
@@ -2713,6 +2940,17 @@ async function runSubscribers(
     );
     return;
   }
+  if (action === "resend-confirmation") {
+    const subscriberIds = getStringList(parsed.options, "subscriber");
+    writeJson(
+      out,
+      await client.audiences.subscribers.resendConfirmation(
+        audienceId,
+        subscriberIds.length > 0 ? { subscriber_ids: subscriberIds } : {},
+      ),
+    );
+    return;
+  }
   if (action === "remove") {
     const subscriberId = requirePositional(parsed.positional, 4, "subscriber id");
     await client.audiences.subscribers.remove(audienceId, subscriberId);
@@ -2883,6 +3121,68 @@ async function runAudienceWelcome(
   throw new CliUsageError("Unknown audiences welcome command.");
 }
 
+async function runAudienceSegments(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const action = parsed.positional[2];
+  const audienceId = requirePositional(parsed.positional, 3, "audience id");
+  if (action === "list") {
+    writeJson(out, await client.audiences.segments.list(audienceId));
+    return;
+  }
+  const idempotencyKey = getString(parsed.options, "idempotency-key");
+  const methodOptions = idempotencyKey ? { idempotencyKey } : undefined;
+  if (action === "create") {
+    writeJson(
+      out,
+      await client.audiences.segments.create(
+        audienceId,
+        {
+          name: getRequiredString(parsed.options, "name"),
+          definition: await segmentDefinition(getRequiredString(parsed.options, "definition")),
+        },
+        methodOptions,
+      ),
+    );
+    return;
+  }
+  const segmentId = requirePositional(parsed.positional, 4, "segment id");
+  if (action === "get") {
+    writeJson(out, await client.audiences.segments.get(audienceId, segmentId));
+    return;
+  }
+  if (action === "update") {
+    const name = getString(parsed.options, "name");
+    const definitionInput = getString(parsed.options, "definition");
+    if (name === undefined && definitionInput === undefined) {
+      throw new CliUsageError("Provide --name, --definition, or both.");
+    }
+    const definition =
+      definitionInput === undefined ? undefined : await segmentDefinition(definitionInput);
+    writeJson(
+      out,
+      await client.audiences.segments.update(
+        audienceId,
+        segmentId,
+        {
+          ...(name !== undefined ? { name } : {}),
+          ...(definition ? { definition } : {}),
+        },
+        methodOptions,
+      ),
+    );
+    return;
+  }
+  if (action === "delete") {
+    await client.audiences.segments.delete(audienceId, segmentId);
+    writeJson(out, { ok: true, id: segmentId });
+    return;
+  }
+  throw new CliUsageError("Unknown audiences segments command.");
+}
+
 async function runAudiences(
   client: ShipmailClient,
   parsed: ParsedArgs,
@@ -2899,6 +3199,10 @@ async function runAudiences(
   }
   if (subcommand === "welcome") {
     await runAudienceWelcome(client, parsed, out);
+    return;
+  }
+  if (subcommand === "segments") {
+    await runAudienceSegments(client, parsed, out);
     return;
   }
   if (subcommand === "list") {
@@ -3811,7 +4115,9 @@ export async function runCli(
     else if (command === "scheduled-messages") await runScheduledMessages(client, parsed, out);
     else if (command === "reply-scans") await runReplyScans(client, parsed, out);
     else if (command === "webhooks") await runWebhooks(client, parsed, out);
+    else if (command === "smtp-credentials") await runSmtpCredentials(client, parsed, out);
     else if (command === "suppressions") await runSuppressions(client, parsed, out);
+    else if (command === "customers") await runCustomers(client, parsed, out);
     else if (command === "templates") await runTemplates(client, parsed, out);
     else if (command === "newsletters") await runNewsletters(client, parsed, out);
     else if (command === "newsletter-assets")

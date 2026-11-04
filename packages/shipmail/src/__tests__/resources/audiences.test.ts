@@ -234,6 +234,47 @@ describe("Audiences.subscribers", () => {
     expect(subscriber.status).toBe("subscribed");
   });
 
+  test("resendConfirmation sends POST .../resend-confirmation with subscriber ids", async () => {
+    const result = {
+      object: "confirmation_resend",
+      audience_id: "aud_123",
+      sent: 1,
+      failed: 0,
+      skipped: { not_found: 1, not_pending: 0, too_old: 0, resend_limit: 0, recently_sent: 0 },
+      remaining: 0,
+    };
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("POST");
+      expect(new URL(String(input)).pathname).toBe(
+        "/v1/audiences/aud_123/subscribers/resend-confirmation",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({ subscriber_ids: ["audmem_1", "audmem_2"] });
+      return Response.json(result);
+    });
+
+    const resend = await client.audiences.subscribers.resendConfirmation("aud_123", {
+      subscriber_ids: ["audmem_1", "audmem_2"],
+    });
+    expect(resend).toEqual(result);
+  });
+
+  test("resendConfirmation without params sends an empty body", async () => {
+    const client = createClient((_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({});
+      return Response.json({
+        object: "confirmation_resend",
+        audience_id: "aud_123",
+        sent: 0,
+        failed: 0,
+        skipped: { not_found: 0, not_pending: 0, too_old: 0, resend_limit: 0, recently_sent: 0 },
+        remaining: 0,
+      });
+    });
+
+    const resend = await client.audiences.subscribers.resendConfirmation("aud_123");
+    expect(resend.sent).toBe(0);
+  });
+
   test("remove sends DELETE .../:subscriberId and returns void", async () => {
     const client = createClient((input, init) => {
       expect(init?.method).toBe("DELETE");

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.8 (2026-11-03)
+
+
+### Features
+
+* **api:** let API and MCP sends add the mailbox's shared signature
+* **api:** manage saved groups from the API, SDKs, CLI and MCP, and fix subscriber paging
+* **calendar:** agents answer and send calendar invitations through the API
+* **customers:** tag customers and filter the list by tag
+* **newsletters:** resend the confirmation email to pending subscribers
+* reply times and customers
+* **ses:** three SES tenants per organization, so a complaint stops only its own kind of email
+* **transactional:** SMTP credentials for transactional senders
+* **usage:** transactional usage ledger in shadow mode, and a 10 MB send limit
+
 ## 0.6.7 (2026-10-27)
 
 

@@ -394,6 +394,133 @@ describe("shipmail CLI", () => {
     expect(stdout.text()).toBe(`${JSON.stringify(response, null, 2)}\n`);
   });
 
+  test("lists suppressions of a stream scope but adds only all or marketing", async () => {
+    let captured: CapturedRequest | undefined;
+    const listed = await runCli(["suppressions", "list", "--scope", "transactional"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({ data: [], pagination: { next_cursor: null, has_more: false } });
+      }),
+    });
+    expect(listed).toBe(0);
+    expect(captured?.url.searchParams.get("scope")).toBe("transactional");
+
+    const stderr = createOutput();
+    const added = await runCli(
+      ["suppressions", "add", "reader@example.com", "--scope", "mailbox"],
+      {
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async () => jsonResponse({})),
+      },
+    );
+    expect(added).not.toBe(0);
+    expect(stderr.text()).toContain("--scope must be one of: all, marketing.");
+  });
+
+  test("upserts a customer by external id with identifiers and fields", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      [
+        "customers",
+        "upsert",
+        "hubspot",
+        "contact/42",
+        "--name",
+        "Jane Doe",
+        "--email",
+        "jane@acme.com",
+        "--domain",
+        "acme.com",
+        "--fields",
+        '{"plan":"enterprise","seats":12}',
+        "--clear-service-level",
+        "--tag",
+        "VIP",
+        "--tag",
+        "beta",
+      ],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({}, { status: 201 });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("PUT");
+    expect(captured?.url.pathname).toBe("/api/v1/customers/external/hubspot/contact%2F42");
+    expect(JSON.parse(String(captured?.init?.body))).toEqual({
+      name: "Jane Doe",
+      service_level_id: null,
+      fields: { plan: "enterprise", seats: 12 },
+      tags: ["VIP", "beta"],
+      identifiers: [
+        { kind: "email", value: "jane@acme.com" },
+        { kind: "domain", value: "acme.com" },
+      ],
+    });
+  });
+
+  test("clears a customer's tags, and refuses --tag with --clear-tags", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["customers", "update", "cust_1", "--clear-tags"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({});
+      }),
+    });
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(captured?.init?.body))).toEqual({ tags: [] });
+
+    const stderr = createOutput();
+    const refused = await runCli(
+      ["customers", "update", "cust_1", "--tag", "vip", "--clear-tags"],
+      {
+        stdout: createOutput().out,
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async () => jsonResponse({})),
+      },
+    );
+    expect(refused).not.toBe(0);
+    expect(stderr.text()).toContain("Use --tag or --clear-tags, not both.");
+  });
+
+  test("lists customers by domain and refuses fields that are not an object", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["customers", "list", "--domain", "acme.com", "--tag", "vip"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({ data: [], pagination: { next_cursor: null, has_more: false } });
+      }),
+    });
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/api/v1/customers");
+    expect(captured?.url.searchParams.get("domain")).toBe("acme.com");
+    expect(captured?.url.searchParams.get("tag")).toBe("vip");
+
+    const stderr = createOutput();
+    const refused = await runCli(["customers", "create", "--fields", "[1]"], {
+      stdout: createOutput().out,
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () => jsonResponse({})),
+    });
+    expect(refused).not.toBe(0);
+    expect(stderr.text()).toContain("--fields must be a JSON object");
+  });
+
   test("prints template commands in help", async () => {
     const stdout = createOutput();
     const code = await runCli(["--help"], { stdout: stdout.out, env: {} });
@@ -1093,6 +1220,103 @@ describe("shipmail CLI", () => {
     ]);
   });
 
+  test("manages audience segments", async () => {
+    const calls: { path: string; method: string; body: unknown; key: string | null }[] = [];
+    const definition = {
+      match: "all",
+      rules: [{ kind: "merge_field", field: "role", operator: "equals", value: "founder" }],
+    };
+    const run = (args: readonly string[]) =>
+      runCli([...args], {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          const method = init?.method ?? "GET";
+          calls.push({
+            path: new URL(String(input)).pathname,
+            method,
+            body: init?.body ? await readJsonBody(init) : null,
+            key: new Headers(init?.headers).get("idempotency-key"),
+          });
+          if (method === "DELETE") return new Response(null, { status: 204 });
+          return jsonResponse({ object: "segment", id: "nwsseg_1" });
+        }),
+      });
+
+    expect(await run(["audiences", "segments", "list", "aud_1"])).toBe(0);
+    expect(
+      await run([
+        "audiences",
+        "segments",
+        "create",
+        "aud_1",
+        "--name",
+        "Founders",
+        "--definition",
+        JSON.stringify(definition),
+        "--idempotency-key",
+        "seg-create",
+      ]),
+    ).toBe(0);
+    expect(await run(["audiences", "segments", "get", "aud_1", "nwsseg_1"])).toBe(0);
+    expect(
+      await run(["audiences", "segments", "update", "aud_1", "nwsseg_1", "--name", "All founders"]),
+    ).toBe(0);
+    expect(await run(["audiences", "segments", "delete", "aud_1", "nwsseg_1"])).toBe(0);
+
+    expect(calls).toEqual([
+      { path: "/api/v1/audiences/aud_1/segments", method: "GET", body: null, key: null },
+      {
+        path: "/api/v1/audiences/aud_1/segments",
+        method: "POST",
+        body: { name: "Founders", definition },
+        key: "seg-create",
+      },
+      { path: "/api/v1/audiences/aud_1/segments/nwsseg_1", method: "GET", body: null, key: null },
+      {
+        path: "/api/v1/audiences/aud_1/segments/nwsseg_1",
+        method: "PATCH",
+        body: { name: "All founders" },
+        key: null,
+      },
+      {
+        path: "/api/v1/audiences/aud_1/segments/nwsseg_1",
+        method: "DELETE",
+        body: null,
+        key: null,
+      },
+    ]);
+  });
+
+  test("refuses a segment update without fields or with a malformed definition", async () => {
+    let requests = 0;
+    const run = (args: readonly string[]) =>
+      runCli([...args], {
+        stdout: createOutput().out,
+        stderr: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async () => {
+          requests += 1;
+          return jsonResponse({});
+        }),
+      });
+
+    expect(await run(["audiences", "segments", "update", "aud_1", "nwsseg_1"])).not.toBe(0);
+    expect(
+      await run([
+        "audiences",
+        "segments",
+        "create",
+        "aud_1",
+        "--name",
+        "Founders",
+        "--definition",
+        '{"match":"some","rules":[]}',
+      ]),
+    ).not.toBe(0);
+    expect(requests).toBe(0);
+  });
+
   test("sends newsletter Markdown as content_markdown", async () => {
     let body: unknown = null;
     const code = await runCli(
@@ -1210,6 +1434,71 @@ describe("shipmail CLI", () => {
     expect(captured?.init?.method).toBe("POST");
     expect(await readJsonBody(captured?.init)).toEqual({ consent_source: "Signup form" });
     expect(JSON.parse(stdout.text()).status).toBe("subscribed");
+  });
+
+  test("resends the confirmation email to chosen pending subscribers", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+
+    const code = await runCli(
+      [
+        "audiences",
+        "subscribers",
+        "resend-confirmation",
+        "aud_1",
+        "--subscriber",
+        "audmem_1",
+        "--subscriber",
+        "audmem_2",
+      ],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({
+            object: "confirmation_resend",
+            audience_id: "aud_1",
+            sent: 2,
+            failed: 0,
+            skipped: {
+              not_found: 0,
+              not_pending: 0,
+              too_old: 0,
+              resend_limit: 0,
+              recently_sent: 0,
+            },
+            remaining: 0,
+          });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.url.href).toBe(
+      "https://shipmail.to/api/v1/audiences/aud_1/subscribers/resend-confirmation",
+    );
+    expect(captured?.init?.method).toBe("POST");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      subscriber_ids: ["audmem_1", "audmem_2"],
+    });
+    expect(JSON.parse(stdout.text()).sent).toBe(2);
+  });
+
+  test("resends the confirmation email to every eligible pending subscriber", async () => {
+    let captured: CapturedRequest | undefined;
+
+    const code = await runCli(["audiences", "subscribers", "resend-confirmation", "aud_1"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({ object: "confirmation_resend", sent: 0 });
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(await readJsonBody(captured?.init)).toEqual({});
   });
 
   test("runs generic authenticated API requests", async () => {
@@ -1690,6 +1979,57 @@ describe("shipmail CLI", () => {
     ]);
   });
 
+  test("lists, creates, and revokes SMTP credentials", async () => {
+    const requests: CapturedRequest[] = [];
+    const stdout = createOutput();
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "POST") {
+        return jsonResponse(
+          { object: "smtp_credential", id: "smtpc_123", password: "once" },
+          { status: 201 },
+        );
+      }
+      return jsonResponse({ object: "list", data: [] });
+    });
+
+    await runCli(["smtp-credentials", "list", "--from", "notifications@notify.example.com"], {
+      stdout: stdout.out,
+      env,
+      fetch,
+    });
+    await runCli(
+      [
+        "smtp-credentials",
+        "create",
+        "--from",
+        "notifications@notify.example.com",
+        "--name",
+        "Supabase Auth",
+      ],
+      { stdout: stdout.out, env, fetch },
+    );
+    await runCli(["smtp-credentials", "revoke", "smtpc_123"], {
+      stdout: stdout.out,
+      env,
+      fetch,
+    });
+
+    expect(requests.map((request) => `${request.init?.method} ${request.url.pathname}`)).toEqual([
+      "GET /v1/smtp-credentials",
+      "POST /v1/smtp-credentials",
+      "DELETE /v1/smtp-credentials/smtpc_123",
+    ]);
+    expect(requests[0]?.url.searchParams.get("from")).toBe("notifications@notify.example.com");
+    expect(headersFrom(requests[1]?.init).get("idempotency-key")).toBeNull();
+    expect(await readJsonBody(requests[1]?.init)).toEqual({
+      from: "notifications@notify.example.com",
+      name: "Supabase Auth",
+    });
+  });
+
   test("lists, creates, and revokes mailbox app passwords", async () => {
     const requests: CapturedRequest[] = [];
     const stdout = createOutput();
@@ -2023,6 +2363,7 @@ describe("shipmail CLI", () => {
           "--text",
           "Hi",
           "--track-reply",
+          "--add-signature",
           "--client-reference",
           "crm-123",
           "--metadata",
@@ -2041,6 +2382,7 @@ describe("shipmail CLI", () => {
       source_rfc_message_id: "<crm-123@example.com>",
       headers: [{ name: "X-CRM-ID", value: "crm-123" }],
       track_reply: true,
+      add_signature: true,
     });
 
     expect(
@@ -2069,6 +2411,7 @@ describe("shipmail CLI", () => {
         "--client-reference",
         "crm-reply-123",
         "--track-reply",
+        "--add-signature",
       ],
       {
         stdout: stdout.out,
@@ -2086,7 +2429,48 @@ describe("shipmail CLI", () => {
       text: "Thanks",
       client_reference: "crm-reply-123",
       track_reply: true,
+      add_signature: true,
     });
+  });
+
+  test("answers a calendar invitation", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      ["messages", "invitation", "respond", "msg_123", "--response", "tentative"],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({
+            object: "invitation_response",
+            message_id: "msg_123",
+            response: "tentative",
+            replied: true,
+            calendar_event_id: "evt_1",
+          });
+        }),
+      },
+    );
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("POST");
+    expect(captured?.url.pathname).toBe("/v1/messages/msg_123/invitation");
+    expect(await readJsonBody(captured?.init)).toEqual({ response: "tentative" });
+  });
+
+  test("refuses an invitation answer it does not know", async () => {
+    const stderr = createOutput();
+    const code = await runCli(
+      ["messages", "invitation", "respond", "msg_123", "--response", "maybe"],
+      {
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+        fetch: stubFetch(async () => jsonResponse({})),
+      },
+    );
+    expect(code).not.toBe(0);
+    expect(stderr.text()).toContain("--response must be one of");
   });
 
   test("lists analytics-safe messages within an update window", async () => {

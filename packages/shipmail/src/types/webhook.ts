@@ -109,3 +109,19 @@ export type WebhookEvent<T = unknown> = {
   readonly test: boolean;
   readonly data: T;
 };
+
+/** The calendar invitation a `message.received` event carries in `data.invitation`, or `null`. */
+export type WebhookInvitation = {
+  readonly method: "request" | "cancel" | "reply" | "other";
+  readonly uid: string;
+  readonly sequence: number;
+  readonly title: string | null;
+  /** An ISO 8601 instant, or a `YYYY-MM-DD` date when `all_day` is true. */
+  readonly start: string | null;
+  readonly end: string | null;
+  readonly all_day: boolean;
+  readonly timezone: string | null;
+  readonly organizer_email: string | null;
+  /** The event with this UID on the mailbox calendar, when its organizer matches. */
+  readonly calendar_event_id: string | null;
+};

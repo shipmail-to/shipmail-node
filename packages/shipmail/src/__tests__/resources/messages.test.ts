@@ -358,4 +358,27 @@ describe("Messages", () => {
       });
     });
   });
+
+  describe("respondToInvitation", () => {
+    test("sends POST /messages/:id/invitation", async () => {
+      const client = createClient((input, init) => {
+        expect(init?.method).toBe("POST");
+        expect(new URL(String(input)).pathname).toBe("/v1/messages/msg_123/invitation");
+        expect(JSON.parse(String(init?.body))).toEqual({ response: "accepted" });
+        return Response.json({
+          object: "invitation_response",
+          message_id: "msg_123",
+          response: "accepted",
+          replied: true,
+          calendar_event_id: "evt_1",
+        });
+      });
+
+      const result = await client.messages.respondToInvitation("msg_123", {
+        response: "accepted",
+      });
+      expect(result.calendar_event_id).toBe("evt_1");
+      expect(result.replied).toBe(true);
+    });
+  });
 });

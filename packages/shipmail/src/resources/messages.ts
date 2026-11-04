@@ -2,11 +2,13 @@ import { Page } from "../pagination.js";
 import { ApiResource } from "../resource.js";
 import type { MethodOptions, PaginatedResponse } from "../types/common.js";
 import type {
+  CalendarInvitationResponseResult,
   ListMessageAnalyticsParams,
   ListMessagesParams,
   Message,
   MessageAnalyticsPage,
   ReplyToMessageParams,
+  RespondToInvitationParams,
   SendMessageParams,
 } from "../types/message.js";
 
@@ -71,6 +73,20 @@ export class Messages extends ApiResource {
     return this.client.request<Message>({
       method: "POST",
       path: `/messages/${encodeURIComponent(id)}/reply`,
+      body: params,
+      methodOptions: options,
+    });
+  }
+
+  /** Accepts, tentatively accepts or declines the calendar invitation a received message carries. */
+  respondToInvitation(
+    id: string,
+    params: RespondToInvitationParams,
+    options?: MethodOptions,
+  ): Promise<CalendarInvitationResponseResult> {
+    return this.client.request<CalendarInvitationResponseResult>({
+      method: "POST",
+      path: `/messages/${encodeURIComponent(id)}/invitation`,
       body: params,
       methodOptions: options,
     });

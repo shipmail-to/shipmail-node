@@ -110,7 +110,12 @@ type SendMessageCommonParams = {
   readonly reply_to?: EmailRecipientInput | undefined;
   readonly in_reply_to?: string | undefined;
   readonly references?: readonly string[] | undefined;
+  /**
+   * Base64 attachments, at most 20. The whole email can be up to 10 MB, attachments and encoding
+   * included; a larger one is refused with 422. The only attachments a transactional sender takes.
+   */
   readonly attachments?: readonly Attachment[] | undefined;
+  /** Up to 20 staged files of 25 MB each, from a mailbox. Transactional senders refuse them. */
   readonly staged_attachment_ids?: readonly string[] | undefined;
   readonly client_reference?: string | undefined;
   readonly metadata?: MessageMetadata | undefined;
@@ -118,6 +123,7 @@ type SendMessageCommonParams = {
   readonly headers?: readonly OutboundHeader[] | undefined;
   readonly scheduled_at?: string | undefined;
   readonly track_reply?: boolean | undefined;
+  readonly add_signature?: boolean | undefined;
   readonly sandbox_outcome?: SandboxOutcome | undefined;
 };
 
@@ -266,6 +272,7 @@ export type ReplyToMessageParams = {
   readonly headers?: readonly OutboundHeader[] | undefined;
   readonly scheduled_at?: string | undefined;
   readonly track_reply?: boolean | undefined;
+  readonly add_signature?: boolean | undefined;
   readonly sandbox_outcome?: SandboxOutcome | undefined;
 };
 
@@ -281,4 +288,19 @@ export type InjectSandboxInboundParams = {
   readonly references?: readonly string[] | undefined;
   readonly received_at?: string | undefined;
   readonly headers?: readonly OutboundHeader[] | undefined;
+};
+
+export type CalendarInvitationResponse = "accepted" | "tentative" | "declined";
+
+export type RespondToInvitationParams = {
+  readonly response: CalendarInvitationResponse;
+};
+
+export type CalendarInvitationResponseResult = {
+  readonly object: "invitation_response";
+  readonly message_id: string;
+  readonly response: CalendarInvitationResponse;
+  /** Whether the reply reached the organizer. It is sent only when the organizer sent the invitation. */
+  readonly replied: boolean;
+  readonly calendar_event_id: string | null;
 };

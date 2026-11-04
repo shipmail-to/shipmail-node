@@ -1,4 +1,5 @@
 import type { EmailRecipientInput, PaginationParams } from "./common.js";
+import type { ReplyTarget } from "./customer.js";
 import type { Message } from "./message.js";
 
 export type AutoReply = {
@@ -289,6 +290,10 @@ export type InboxThreadSummary = {
   readonly latest_outbound_message_id: string | null;
   readonly latest_outbound_email_id: string | null;
   readonly latest_outbound_at: string | null;
+  /** The customer this conversation belongs to, if any. */
+  readonly customer_id: string | null;
+  /** The open reply clock. Null when no reply is owed or reply times are off. */
+  readonly reply_target: ReplyTarget | null;
 };
 
 export type InboxThreads = {
@@ -389,6 +394,8 @@ export type InboxThread = {
   readonly conversation_id: string | null;
   /** Current conversation version. Pass it as `expected_version` to `createInboxReplyDraft`. */
   readonly version: number | null;
+  readonly customer_id: string | null;
+  readonly reply_target: ReplyTarget | null;
   readonly data: readonly InboxFullMessage[];
 };
 

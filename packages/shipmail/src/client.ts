@@ -5,6 +5,7 @@ import { BookingLinks } from "./resources/booking-links.js";
 import { BookingPages } from "./resources/booking-pages.js";
 import { Calendar } from "./resources/calendar.js";
 import { Capabilities } from "./resources/capabilities.js";
+import { Customers } from "./resources/customers.js";
 import { Domains } from "./resources/domains.js";
 import { Mailboxes } from "./resources/mailboxes.js";
 import { Members } from "./resources/members.js";
@@ -13,6 +14,7 @@ import { Newsletters } from "./resources/newsletters.js";
 import { Organization } from "./resources/organization.js";
 import { ReplyScans } from "./resources/reply-scans.js";
 import { ScheduledMessages } from "./resources/scheduled-messages.js";
+import { SmtpCredentials } from "./resources/smtp-credentials.js";
 import { Status } from "./resources/status.js";
 import { Suppressions } from "./resources/suppressions.js";
 import { Templates } from "./resources/templates.js";
@@ -90,6 +92,7 @@ export class ShipmailClient {
   readonly bookingPages: BookingPages;
   readonly capabilities: Capabilities;
   readonly calendar: Calendar;
+  readonly customers: Customers;
   readonly domains: Domains;
   readonly mailboxes: Mailboxes;
   readonly members: Members;
@@ -98,6 +101,7 @@ export class ShipmailClient {
   readonly organization: Organization;
   readonly replyScans: ReplyScans;
   readonly scheduledMessages: ScheduledMessages;
+  readonly smtpCredentials: SmtpCredentials;
   readonly suppressions: Suppressions;
   readonly templates: Templates;
   readonly threads: Threads;
@@ -135,6 +139,7 @@ export class ShipmailClient {
     this.bookingPages = new BookingPages(this);
     this.capabilities = new Capabilities(this);
     this.calendar = new Calendar(this);
+    this.customers = new Customers(this);
     this.domains = new Domains(this);
     this.mailboxes = new Mailboxes(this);
     this.members = new Members(this);
@@ -143,6 +148,7 @@ export class ShipmailClient {
     this.organization = new Organization(this);
     this.replyScans = new ReplyScans(this);
     this.scheduledMessages = new ScheduledMessages(this);
+    this.smtpCredentials = new SmtpCredentials(this);
     this.suppressions = new Suppressions(this);
     this.templates = new Templates(this);
     this.threads = new Threads(this);

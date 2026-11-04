@@ -405,7 +405,26 @@ export type NewsletterColumnContent = {
   readonly cta_url?: string | null | undefined;
 };
 
-export type NewsletterBlock =
+export type NewsletterBlockChannel = "all" | "email" | "web";
+export type NewsletterBlockSegmentRule = "in" | "not_in";
+
+/**
+ * Where a block shows and to which readers. The website, archive and feed show a block as a reader
+ * in no segment sees it. Segment membership is fixed when the send is scheduled. Welcome emails
+ * accept `channel` only.
+ */
+export type NewsletterBlockVisibility = {
+  readonly channel?: NewsletterBlockChannel | undefined;
+  /** A segment of the issue's audience; null shows the block to every reader. */
+  readonly segment_id?: string | null | undefined;
+  readonly segment_rule?: NewsletterBlockSegmentRule | undefined;
+};
+
+export type NewsletterBlock = NewsletterBlockContent & {
+  readonly visibility?: NewsletterBlockVisibility | undefined;
+};
+
+type NewsletterBlockContent =
   | { readonly type: "heading"; readonly text: string; readonly level?: 1 | 2 | 3 | undefined }
   | { readonly type: "paragraph"; readonly body: string }
   | {

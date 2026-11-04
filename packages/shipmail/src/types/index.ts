@@ -4,10 +4,13 @@ export type {
   AddSubscribersBatchResult,
   Audience,
   AudienceFeed,
+  ConfirmationResend,
+  ConfirmationResendSkipped,
   CreateAudienceParams,
   ListAudiencesParams,
   ListSubscribersParams,
   MergeFields,
+  ResendSubscriberConfirmationParams,
   ResubscribeSubscriberParams,
   Subscriber,
   SubscriberOutcome,
@@ -103,6 +106,22 @@ export {
   WEBHOOK_DELIVERY_STATUSES,
   WEBHOOK_EVENT_TYPES,
 } from "./common.js";
+export type {
+  CreateCustomerParams,
+  Customer,
+  CustomerExternalId,
+  CustomerField,
+  CustomerFieldType,
+  CustomerFieldValue,
+  CustomerIdentifier,
+  CustomerIdentifierKind,
+  ListCustomersParams,
+  ReplyTarget,
+  ReplyTargetState,
+  ServiceLevel,
+  UpdateCustomerParams,
+  UpsertCustomerParams,
+} from "./customer.js";
 export type {
   CreateDomainParams,
   Domain,
@@ -241,6 +260,8 @@ export type {
   MemberRole,
 } from "./member.js";
 export type {
+  CalendarInvitationResponse,
+  CalendarInvitationResponseResult,
   InjectSandboxInboundParams,
   ListMessageAnalyticsParams,
   ListMessagesParams,
@@ -253,6 +274,7 @@ export type {
   OutboundHeader,
   PrepareStagedAttachmentUploadParams,
   ReplyToMessageParams,
+  RespondToInvitationParams,
   ScheduledMessage,
   ScheduledMessageAttachment,
   ScheduledMessageList,
@@ -280,6 +302,9 @@ export type {
   NewsletterAssetStorageUsage,
   NewsletterAssetUpload,
   NewsletterBlock,
+  NewsletterBlockChannel,
+  NewsletterBlockSegmentRule,
+  NewsletterBlockVisibility,
   NewsletterButtonAlign,
   NewsletterCalloutVariant,
   NewsletterChangelogEntry,
@@ -324,7 +349,31 @@ export type {
   ReplyScanStatus,
 } from "./reply-scan.js";
 export type {
+  CreateSegmentParams,
+  ListSegmentsResponse,
+  Segment,
+  SegmentDefinition,
+  SegmentEngagementTier,
+  SegmentEngagementTierRule,
+  SegmentIssuesReceivedRule,
+  SegmentJoinDateRule,
+  SegmentLastSignOfLifeRule,
+  SegmentMergeFieldRule,
+  SegmentRule,
+  UpdateSegmentParams,
+} from "./segment.js";
+export type {
+  CreatedSmtpCredential,
+  CreateSmtpCredentialParams,
+  ListSmtpCredentialsParams,
+  SmtpCredential,
+  SmtpCredentialList,
+  SmtpCredentialPort,
+  SmtpCredentialPortSecurity,
+} from "./smtp-credential.js";
+export type {
   CreateSuppressionParams,
+  CreateSuppressionScope,
   ListSuppressionsParams,
   Suppression,
   SuppressionReason,
@@ -355,6 +404,7 @@ export type {
   WebhookDelivery,
   WebhookDeliveryDetail,
   WebhookEvent,
+  WebhookInvitation,
   WebhookWithSecret,
 } from "./webhook.js";
 export type {

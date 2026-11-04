@@ -142,6 +142,14 @@ export type {
   UpdateDomainParams,
 } from "./domain.js";
 export type {
+  AckEventQueueEventsResponse,
+  CreateEventQueueParams,
+  EventQueue,
+  EventQueueEvents,
+  ListEventQueueEventsParams,
+  ListEventQueuesParams,
+} from "./event-queue.js";
+export type {
   CompleteImportUploadParams,
   CompleteImportUploadPart,
   CreateImportUploadParams,

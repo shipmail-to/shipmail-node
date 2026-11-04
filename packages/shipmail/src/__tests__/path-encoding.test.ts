@@ -323,6 +323,24 @@ describe("URL path encoding (defense-in-depth)", () => {
     expect(new URL(cap.url()).pathname).toBe("/v1/webhooks/a%2Fb/deliveries");
   });
 
+  test("eventQueues.get and delete encode id", async () => {
+    const cap = captureUrl();
+    const client = createClient(cap.handler);
+    await client.eventQueues.get("a/b").catch(() => undefined);
+    expect(new URL(cap.url()).pathname).toBe("/v1/event-queues/a%2Fb");
+    await client.eventQueues.delete("a/b").catch(() => undefined);
+    expect(new URL(cap.url()).pathname).toBe("/v1/event-queues/a%2Fb");
+  });
+
+  test("eventQueues.listEvents and ack encode id and preserve suffixes", async () => {
+    const cap = captureUrl();
+    const client = createClient(cap.handler);
+    await client.eventQueues.listEvents("a/b").catch(() => undefined);
+    expect(new URL(cap.url()).pathname).toBe("/v1/event-queues/a%2Fb/events");
+    await client.eventQueues.ack("a/b", ["evt_1"]).catch(() => undefined);
+    expect(new URL(cap.url()).pathname).toBe("/v1/event-queues/a%2Fb/events/ack");
+  });
+
   test("suppressions.remove encodes email", async () => {
     const cap = captureUrl();
     const client = createClient(cap.handler);

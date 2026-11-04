@@ -4353,4 +4353,117 @@ describe("shipmail CLI", () => {
     expect(new Headers(captured?.init?.headers).get("idempotency-key")).toBe("replay-123");
     expect(JSON.parse(stdout.text()).id).toBe("dlv_replay");
   });
+
+  test("creates an event queue with filters", async () => {
+    let captured: CapturedRequest | undefined;
+    const stdout = createOutput();
+
+    const code = await runCli(
+      [
+        "event-queues",
+        "create",
+        "--events",
+        "message.received,message.bounced",
+        "--description",
+        "Inbound for my agent",
+        "--mailbox-id",
+        "mbx_1",
+        "--mailbox-id",
+        "mbx_2",
+        "--authenticated-senders-only",
+        "--allowed-sender",
+        "customer.com",
+      ],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({ object: "event_queue", id: "evq_123" }, { status: 201 });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("POST");
+    expect(captured?.url.pathname).toBe("/api/v1/event-queues");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      events: ["message.received", "message.bounced"],
+      description: "Inbound for my agent",
+      mailbox_ids: ["mbx_1", "mbx_2"],
+      authenticated_senders_only: true,
+      allowed_senders: ["customer.com"],
+    });
+    expect(JSON.parse(stdout.text()).id).toBe("evq_123");
+  });
+
+  test("rejects an event queue with an unknown event type", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["event-queues", "create", "--events", "message.nope"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+    });
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Invalid webhook event type: message.nope.");
+  });
+
+  test("lists, gets and deletes event queues", async () => {
+    const requests: CapturedRequest[] = [];
+    const stdout = createOutput();
+    const options = {
+      stdout: stdout.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        requests.push({ url: new URL(String(input)), init });
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        return jsonResponse({ object: "event_queue", id: "evq_123" });
+      }),
+    };
+
+    expect(await runCli(["event-queues", "list", "--limit", "10"], options)).toBe(0);
+    expect(await runCli(["event-queues", "get", "evq_123"], options)).toBe(0);
+    expect(await runCli(["event-queues", "delete", "evq_123"], options)).toBe(0);
+
+    expect(requests[0]?.url.pathname).toBe("/api/v1/event-queues");
+    expect(requests[0]?.url.searchParams.get("limit")).toBe("10");
+    expect(requests[1]?.init?.method).toBe("GET");
+    expect(requests[1]?.url.pathname).toBe("/api/v1/event-queues/evq_123");
+    expect(requests[2]?.init?.method).toBe("DELETE");
+    expect(requests[2]?.url.pathname).toBe("/api/v1/event-queues/evq_123");
+    expect(stdout.text()).toContain('"ok": true');
+  });
+
+  test("reads and acknowledges event queue events", async () => {
+    const requests: CapturedRequest[] = [];
+    const options = {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        requests.push({ url: new URL(String(input)), init });
+        if (init?.method === "POST") return jsonResponse({ acknowledged: 2 });
+        return jsonResponse({ data: [], has_more: false });
+      }),
+    };
+
+    expect(await runCli(["event-queues", "events", "evq_123", "--limit", "100"], options)).toBe(0);
+    expect(await runCli(["event-queues", "ack", "evq_123", "evt_1", "evt_2"], options)).toBe(0);
+
+    expect(requests[0]?.url.pathname).toBe("/api/v1/event-queues/evq_123/events");
+    expect(requests[0]?.url.searchParams.get("limit")).toBe("100");
+    expect(requests[1]?.init?.method).toBe("POST");
+    expect(requests[1]?.url.pathname).toBe("/api/v1/event-queues/evq_123/events/ack");
+    expect(await readJsonBody(requests[1]?.init)).toEqual({ event_ids: ["evt_1", "evt_2"] });
+  });
+
+  test("requires an event id to acknowledge", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["event-queues", "ack", "evq_123"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+    });
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Provide at least one event id.");
+  });
 });

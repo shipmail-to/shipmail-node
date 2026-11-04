@@ -117,6 +117,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "booking.created",
   "subscriber.added",
   "newsletter.sent",
+  "draft.reviewed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

@@ -185,6 +185,14 @@ shipmail webhooks deliveries whk_123 --status failed
 shipmail webhooks replay-delivery whk_123 dlv_123 --idempotency-key replay-123
 ```
 
+An event queue holds the same events for you to read with your API key, without a public URL:
+
+```bash
+shipmail event-queues create --events message.received --authenticated-senders-only
+shipmail event-queues events evq_123 --limit 100
+shipmail event-queues ack evq_123 evt_1 evt_2
+```
+
 Paragraph, quote, callout, list-item, and column bodies in `--blocks` accept bare text or
 sanitized inline HTML. Use `<p>` and `<br>` for line breaks. Shipmail keeps `a`, `b`, `br`,
 `code`, `em`, `i`, `p`, `s`, `span`, `strong`, and `u`, with safe attributes and URLs.
@@ -229,6 +237,7 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 - `scheduled-messages list|get|update|cancel`
 - `mailboxes sandbox-inbound`
 - `webhooks list|create|update|test|deliveries|replay-delivery`
+- `event-queues list|create|get|delete|events|ack`
 - `smtp-credentials list|create|revoke`
 - `suppressions add|list|remove`
 - `templates list|create|get|update|delete|publish|render|versions|version|restore` (`messages send --template` sends one)

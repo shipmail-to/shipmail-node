@@ -886,8 +886,8 @@ Usage:
   shipmail inbox threads <mailbox-id> [--attention-state needs_reply] [--after ISO] [--before ISO] [--limit 25] [--cursor cur]
   shipmail inbox thread <mailbox-id> <thread-id>
   shipmail inbox thread-attention <mailbox-id> <thread-id> --done true --expected-version 3
-  shipmail inbox draft <mailbox-id> <thread-id> --expected-version 3 (--text "Hello" | --html "<p>Hello</p>") [--reply-mode reply_all]
-  shipmail inbox compose-draft <mailbox-id> --to user@example.com [--cc ...] [--bcc ...] [--subject "Hi"] (--text "Hello" | --html "<p>Hello</p>") [--idempotency-key key]  (saves a new message to Drafts; never sends)
+  shipmail inbox draft <mailbox-id> <thread-id> --expected-version 3 (--text "Hello" | --html "<p>Hello</p>") [--reply-mode reply_all] [--staged-attachment-id sat_...]
+  shipmail inbox compose-draft <mailbox-id> --to user@example.com [--cc ...] [--bcc ...] [--subject "Hi"] (--text "Hello" | --html "<p>Hello</p>") [--staged-attachment-id sat_...] [--idempotency-key key]  (saves a new message to Drafts; never sends)
   shipmail inbox drafts <mailbox-id> <thread-id>
   shipmail inbox get-draft <mailbox-id> <thread-id> <draft-id>
   shipmail inbox update-draft <mailbox-id> <thread-id> <draft-id> (--text "Hello" | --html "<p>Hello</p>")  (the new body replaces the old one)
@@ -915,6 +915,12 @@ Usage:
   shipmail webhooks create --url https://example.com/hook --events message.received,message.bounced [--authorization "Bearer key"] [--standard-webhooks-secret whsec_...] [--include-reply-text] [--authenticated-senders-only] [--allowed-sender jane@customer.com --allowed-sender customer.com]
   shipmail webhooks update <webhook-id> [--url https://example.com/hook] [--events message.received] [--description text] [--active true|false] [--authorization "Bearer key" | --clear-authorization] [--standard-webhooks-secret whsec_... | --clear-standard-webhooks-secret] [--include-reply-text true|false] [--authenticated-senders-only true|false] [--allowed-sender customer.com ... | --clear-allowed-senders]
   shipmail webhooks replay-delivery <webhook-id> <delivery-id> [--idempotency-key key]
+  shipmail event-queues list [--limit 25] [--cursor cur]
+  shipmail event-queues create --events message.received,message.bounced [--description text] [--mailbox-id mbx ...] [--domain-id dom ...] [--include-reply-text] [--authenticated-senders-only] [--allowed-sender customer.com ...]  (stores events for you to read with your API key; no public URL needed)
+  shipmail event-queues get <event-queue-id>
+  shipmail event-queues delete <event-queue-id>
+  shipmail event-queues events <event-queue-id> [--limit 50]  (oldest unacknowledged events first; reading changes nothing)
+  shipmail event-queues ack <event-queue-id> <event-id> [<event-id> ...]  (removes handled events; repeat events while has_more)
   shipmail smtp-credentials list [--from notifications@notify.example.com]
   shipmail smtp-credentials create --from notifications@notify.example.com --name "Supabase Auth"  (prints the password once)
   shipmail smtp-credentials revoke <smtp-credential-id>
@@ -1235,6 +1241,16 @@ function webhookAllowedSendersUpdate(
     throw new CliUsageError("Use --allowed-sender or --clear-allowed-senders, not both.");
   }
   return clear ? null : senders;
+}
+
+function optionalIdList(
+  options: ParsedArgs["options"],
+  key: string,
+): readonly string[] | undefined {
+  const value = optionValue(options, key);
+  if (value === undefined) return undefined;
+  if (typeof value === "boolean") throw new CliUsageError(`Missing value for --${key}.`);
+  return getStringList(options, key);
 }
 
 function webhookUpdateParams(options: ParsedArgs["options"]): UpdateWebhookParams {
@@ -1991,6 +2007,9 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
           expected_version: expectedVersion,
           ...(text ? { text } : {}),
           ...(html ? { html } : {}),
+          ...(getStringList(parsed.options, "staged-attachment-id").length > 0
+            ? { staged_attachment_ids: getStringList(parsed.options, "staged-attachment-id") }
+            : {}),
           ...(getString(parsed.options, "reply-mode")
             ? { reply_mode: getString(parsed.options, "reply-mode") as "reply" | "reply_all" }
             : {}),
@@ -2020,6 +2039,9 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
           ...(subject !== undefined ? { subject } : {}),
           ...(text ? { text } : {}),
           ...(html ? { html } : {}),
+          ...(getStringList(parsed.options, "staged-attachment-id").length > 0
+            ? { staged_attachment_ids: getStringList(parsed.options, "staged-attachment-id") }
+            : {}),
         },
         idempotencyKey ? { idempotencyKey } : undefined,
       ),
@@ -2330,6 +2352,78 @@ async function runScheduledMessages(
     return;
   }
   throw new CliUsageError("Unknown scheduled-messages command.");
+}
+
+async function runEventQueues(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(
+      out,
+      await client.eventQueues.list({
+        cursor: getString(parsed.options, "cursor"),
+        limit: getNumber(parsed.options, "limit"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "create") {
+    const description = getString(parsed.options, "description");
+    const mailboxIds = optionalIdList(parsed.options, "mailbox-id");
+    const domainIds = optionalIdList(parsed.options, "domain-id");
+    const includeReplyText = getBoolean(parsed.options, "include-reply-text");
+    const authenticatedSendersOnly = getBoolean(parsed.options, "authenticated-senders-only");
+    const allowedSenders = webhookAllowedSenders(parsed.options);
+    writeJson(
+      out,
+      await client.eventQueues.create({
+        events: webhookEvents(parsed.options),
+        ...(description ? { description } : {}),
+        ...(mailboxIds !== undefined ? { mailbox_ids: mailboxIds } : {}),
+        ...(domainIds !== undefined ? { domain_ids: domainIds } : {}),
+        ...(includeReplyText !== undefined ? { include_reply_text: includeReplyText } : {}),
+        ...(authenticatedSendersOnly !== undefined
+          ? { authenticated_senders_only: authenticatedSendersOnly }
+          : {}),
+        ...(allowedSenders !== undefined ? { allowed_senders: allowedSenders } : {}),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "get") {
+    writeJson(
+      out,
+      await client.eventQueues.get(requirePositional(parsed.positional, 2, "event queue id")),
+    );
+    return;
+  }
+  if (subcommand === "delete") {
+    const id = requirePositional(parsed.positional, 2, "event queue id");
+    await client.eventQueues.delete(id);
+    writeJson(out, { ok: true, id });
+    return;
+  }
+  if (subcommand === "events") {
+    writeJson(
+      out,
+      await client.eventQueues.listEvents(
+        requirePositional(parsed.positional, 2, "event queue id"),
+        { limit: getNumber(parsed.options, "limit") },
+      ),
+    );
+    return;
+  }
+  if (subcommand === "ack") {
+    const id = requirePositional(parsed.positional, 2, "event queue id");
+    const eventIds = parsed.positional.slice(3);
+    if (eventIds.length === 0) throw new CliUsageError("Provide at least one event id.");
+    writeJson(out, await client.eventQueues.ack(id, eventIds));
+    return;
+  }
+  throw new CliUsageError("Unknown event-queues command.");
 }
 
 async function runWebhooks(client: ShipmailClient, parsed: ParsedArgs, out: Output): Promise<void> {
@@ -4115,6 +4209,7 @@ export async function runCli(
     else if (command === "scheduled-messages") await runScheduledMessages(client, parsed, out);
     else if (command === "reply-scans") await runReplyScans(client, parsed, out);
     else if (command === "webhooks") await runWebhooks(client, parsed, out);
+    else if (command === "event-queues") await runEventQueues(client, parsed, out);
     else if (command === "smtp-credentials") await runSmtpCredentials(client, parsed, out);
     else if (command === "suppressions") await runSuppressions(client, parsed, out);
     else if (command === "customers") await runCustomers(client, parsed, out);

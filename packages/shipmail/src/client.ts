@@ -7,6 +7,7 @@ import { Calendar } from "./resources/calendar.js";
 import { Capabilities } from "./resources/capabilities.js";
 import { Customers } from "./resources/customers.js";
 import { Domains } from "./resources/domains.js";
+import { EventQueues } from "./resources/event-queues.js";
 import { Mailboxes } from "./resources/mailboxes.js";
 import { Members } from "./resources/members.js";
 import { Messages } from "./resources/messages.js";
@@ -94,6 +95,7 @@ export class ShipmailClient {
   readonly calendar: Calendar;
   readonly customers: Customers;
   readonly domains: Domains;
+  readonly eventQueues: EventQueues;
   readonly mailboxes: Mailboxes;
   readonly members: Members;
   readonly messages: Messages;
@@ -141,6 +143,7 @@ export class ShipmailClient {
     this.calendar = new Calendar(this);
     this.customers = new Customers(this);
     this.domains = new Domains(this);
+    this.eventQueues = new EventQueues(this);
     this.mailboxes = new Mailboxes(this);
     this.members = new Members(this);
     this.messages = new Messages(this);

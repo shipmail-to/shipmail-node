@@ -348,6 +348,9 @@ export type InboxReplyDraft = {
   readonly created_at: string;
   readonly updated_at: string;
   readonly sent_at: string | null;
+  /** Link for a person to review this one draft and send it, or null when the draft is not in draft status or the key is in test mode. The person must be signed in with access to the mailbox. Opening it sends nothing, and it stops working after the send. */
+  readonly review_url: string | null;
+  readonly attachments: readonly InboxDraftAttachment[];
 };
 
 /** Returned by create and update. Lists formatting the HTML sanitiser dropped, such as `table`. */
@@ -358,6 +361,12 @@ export type InboxReplyDraftWrite = InboxReplyDraft & {
 export type InboxReplyDraftList = {
   readonly object: "list";
   readonly data: readonly InboxReplyDraft[];
+};
+
+export type InboxDraftAttachment = {
+  readonly name: string | null;
+  readonly type: string;
+  readonly size: number;
 };
 
 export type InboxDraftRecipient = { readonly address: string; readonly name: string | null };
@@ -375,6 +384,9 @@ export type InboxDraft = {
   /** Formatting the HTML sanitiser dropped, such as `table` or `h4`. */
   readonly removed_formatting: readonly string[];
   readonly created_at: string;
+  /** Link for a person to review this one draft and send it, or null for a test-mode key. The person must be signed in with access to the mailbox. Opening it sends nothing, and it stops working once the draft is sent, deleted or replaced. */
+  readonly review_url: string | null;
+  readonly attachments: readonly InboxDraftAttachment[];
 };
 
 export type InboxReplyDraftSend = {
@@ -571,6 +583,8 @@ export type CreateInboxDraftParams = {
   readonly subject?: string | undefined;
   readonly text?: string | undefined;
   readonly html?: string | undefined;
+  /** Files uploaded through the staged attachment flow. A draft-only key may upload them. */
+  readonly staged_attachment_ids?: readonly string[] | undefined;
 };
 
 export type CreateInboxReplyDraftParams = {
@@ -578,6 +592,8 @@ export type CreateInboxReplyDraftParams = {
   readonly html?: string | undefined;
   readonly reply_mode?: "reply" | "reply_all" | undefined;
   readonly expected_version: number;
+  /** Files uploaded through the staged attachment flow. A draft-only key may upload them. */
+  readonly staged_attachment_ids?: readonly string[] | undefined;
 };
 
 /** The new body replaces the old one. HTML alone derives the text part; text alone makes a plain-text draft. */

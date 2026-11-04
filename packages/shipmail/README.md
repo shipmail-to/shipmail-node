@@ -484,6 +484,34 @@ await shipmail.webhooks.replayDelivery("whk_...", "dlv_...", {
 });
 ```
 
+### Event queues
+
+An event queue stores the same events as a webhook for you to read with your API key, so an agent
+on a cron, a serverless function or a laptop needs no public URL. Delivery is at least once: dedupe
+on `event_id`. Events not acknowledged within 30 days are deleted.
+
+```typescript
+const queue = await shipmail.eventQueues.create({ events: ["message.received"] });
+
+let page;
+do {
+  page = await shipmail.eventQueues.listEvents(queue.id, { limit: 100 });
+  for (const event of page.data) {
+    // handle event, skipping event_id values already handled
+  }
+  if (page.data.length > 0) {
+    await shipmail.eventQueues.ack(
+      queue.id,
+      page.data.map((event) => event.event_id),
+    );
+  }
+} while (page.has_more);
+
+await shipmail.eventQueues.list();
+await shipmail.eventQueues.get(queue.id);
+await shipmail.eventQueues.delete(queue.id);
+```
+
 Supported event types:
 
 ```
@@ -515,6 +543,7 @@ calendar.rsvp_updated
 booking.created
 subscriber.added
 newsletter.sent
+draft.reviewed
 ```
 
 ## Suppressions

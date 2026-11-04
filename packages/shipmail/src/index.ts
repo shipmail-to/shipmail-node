@@ -39,6 +39,7 @@ export type {
   UpdateAutomationParams,
 } from "./types/automation.js";
 export type {
+  AckEventQueueEventsResponse,
   AddSubscriberParams,
   AddSubscribersBatchParams,
   AddSubscribersBatchResult,
@@ -74,6 +75,7 @@ export type {
   CreatedMailboxAppPassword,
   CreateDomainParams,
   CreatedSmtpCredential,
+  CreateEventQueueParams,
   CreateInboxDraftParams,
   CreateInboxReplyDraftParams,
   CreateMailboxAppPasswordParams,
@@ -119,6 +121,8 @@ export type {
   EmailRecipientInput,
   ErrorLimit,
   ErrorType,
+  EventQueue,
+  EventQueueEvents,
   GetCalendarEventParams,
   GetThreadParams,
   InboxAttachment,
@@ -156,6 +160,8 @@ export type {
   ListCustomersParams,
   ListDeliveriesParams,
   ListDomainsParams,
+  ListEventQueueEventsParams,
+  ListEventQueuesParams,
   ListInboxMessagesParams,
   ListInboxThreadsParams,
   ListMailboxesParams,

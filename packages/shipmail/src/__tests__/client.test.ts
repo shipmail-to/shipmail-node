@@ -341,6 +341,7 @@ describe("ShipmailClient", () => {
       expect(client.messages).toBeDefined();
       expect(client.threads).toBeDefined();
       expect(client.webhooks).toBeDefined();
+      expect(client.eventQueues).toBeDefined();
       expect(client.status).toBeDefined();
     });
   });

@@ -7,14 +7,18 @@ export type {
   ConfirmationResend,
   ConfirmationResendSkipped,
   CreateAudienceParams,
+  EmailCopy,
+  EmailCopyEntry,
   ListAudiencesParams,
   ListSubscribersParams,
   MergeFields,
+  NotMailableReason,
   ResendSubscriberConfirmationParams,
   ResubscribeSubscriberParams,
   Subscriber,
   SubscriberOutcome,
   SubscriberResult,
+  SubscriberSkipReason,
   SubscriberStatus,
   UpdateAudienceFeedParams,
   UpdateAudienceParams,
@@ -23,15 +27,20 @@ export type {
 export type {
   Automation,
   AutomationAction,
+  AutomationBlockedReason,
   AutomationCondition,
   AutomationDefinition,
   AutomationRun,
   AutomationRunStatus,
   AutomationRunSummary,
+  AutomationSendDegradedReason,
   AutomationStatus,
+  AutomationTest,
+  AutomationTestCondition,
   AutomationTrigger,
   CreateAutomationParams,
   ListAutomationsResponse,
+  TestAutomationParams,
   UpdateAutomationParams,
 } from "./automation.js";
 export type {
@@ -45,8 +54,11 @@ export type {
 export { BOOKING_LINK_STATUSES } from "./booking-link.js";
 export type {
   BookingPage,
+  BookingPageSlot,
+  BookingPageSlots,
   ConferencingProviderId,
   CreateBookingPageParams,
+  GetBookingPageSlotsParams,
   ListBookingPagesParams,
   UpdateBookingPageParams,
 } from "./booking-page.js";
@@ -64,6 +76,8 @@ export type {
   CalendarFreeBusyStatus,
   CalendarInvitationLanguage,
   CalendarInvitationOutcome,
+  CalendarInvitationSkip,
+  CalendarInvitationSkipReason,
   CalendarPerson,
   CreateCalendarEventParams,
   DeleteCalendarEventParams,
@@ -76,13 +90,18 @@ export type {
   UpdateCalendarEventParams,
   Weekday,
 } from "./calendar.js";
-export type { CapabilitiesResponse, CapabilityResourceConstraints } from "./capabilities.js";
+export type {
+  CapabilitiesResponse,
+  CapabilityOrganization,
+  CapabilityResourceConstraints,
+} from "./capabilities.js";
 export type {
   ApiErrorBody,
   DataMode,
   DomainStatus,
   EmailRecipient,
   EmailRecipientInput,
+  ErrorDetail,
   ErrorLimit,
   ErrorType,
   MessageSource,
@@ -192,7 +211,9 @@ export type {
   CreateMailboxFolderParams,
   CreateMailboxForwardingParams,
   CreateMailboxParams,
+  DeliveryStatus,
   DownloadInboxAttachmentParams,
+  DraftAttachmentSelection,
   EmailAuthenticationResults,
   EmailAuthVerdict,
   InboxAttachment,
@@ -205,6 +226,8 @@ export type {
   InboxKeyword,
   InboxMessage,
   InboxMessageAction,
+  InboxMessageCategory,
+  InboxMessageDetail,
   InboxMessages,
   InboxMessageSecurity,
   InboxMessageSecurityReview,
@@ -248,6 +271,7 @@ export type {
   ReleaseInboxMessageSecurityParams,
   ResetMailboxPasswordParams,
   UpdateAutoReplyParams,
+  UpdateInboxDraftParams,
   UpdateInboxMessageParams,
   UpdateInboxReplyDraftParams,
   UpdateInboxThreadAttentionParams,
@@ -295,10 +319,13 @@ export type {
   UpdateScheduledMessageParams,
 } from "./message.js";
 export type {
+  CreateNewsletterDomainParams,
   CreateNewsletterFromChangelogParams,
   CreateNewsletterParams,
+  CreateNewsletterSenderIdentityParams,
   ListNewsletterAssetsParams,
   ListNewsletterDomainsParams,
+  ListNewsletterRecipientsParams,
   ListNewsletterSenderIdentitiesParams,
   ListNewslettersParams,
   Newsletter,
@@ -323,6 +350,7 @@ export type {
   NewsletterColumnRatio,
   NewsletterCountedUrl,
   NewsletterDomain,
+  NewsletterDomainDnsRecord,
   NewsletterDomainRecordStatus,
   NewsletterDomainStatus,
   NewsletterPreflight,
@@ -330,7 +358,11 @@ export type {
   NewsletterPreflightItemStatus,
   NewsletterPreflightStatus,
   NewsletterPreview,
+  NewsletterPreviewAs,
   NewsletterPublishTarget,
+  NewsletterRecipient,
+  NewsletterRecipientReason,
+  NewsletterRecipientStatus,
   NewsletterSenderIdentity,
   NewsletterStatus,
   NewsletterStylingMode,
@@ -340,14 +372,23 @@ export type {
   NewsletterUrlBreakdown,
   NewsletterUrlSource,
   PrepareNewsletterAssetUploadParams,
+  PreviewNewsletterParams,
   RegisterNewsletterAssetFromUrlParams,
   ScheduleNewsletterParams,
   SendNewsletterTestParams,
   SendNewsletterToMoreParams,
   UpdateNewsletterParams,
+  UpdateNewsletterSenderIdentityParams,
   UploadNewsletterAssetParams,
 } from "./newsletter.js";
-export type { OrganizationAccess } from "./organization.js";
+export { NEWSLETTER_RECIPIENT_REASONS, NEWSLETTER_RECIPIENT_STATUSES } from "./newsletter.js";
+export type {
+  OrganizationAccess,
+  OrganizationAiSettings,
+  OrganizationSettings,
+  UpdateOrganizationAiSettingsParams,
+  UpdateOrganizationParams,
+} from "./organization.js";
 export type {
   CreateReplyScanParams,
   ListReplyScanResultsParams,
@@ -383,8 +424,14 @@ export type {
   CreateSuppressionParams,
   CreateSuppressionScope,
   ListSuppressionsParams,
+  NewsletterOptOutLift,
+  NewsletterOptOutSuppression,
+  ResubscribeNewsletterOptOutParams,
   Suppression,
+  SuppressionEntry,
+  SuppressionListReason,
   SuppressionReason,
+  SuppressionRemoval,
   SuppressionScope,
 } from "./suppression.js";
 export type {
@@ -401,6 +448,20 @@ export type {
   UpdateTemplateParams,
 } from "./template.js";
 export type { GetThreadParams, ListThreadsParams, ReplyToThreadParams, Thread } from "./thread.js";
+export type {
+  CreateTransactionalDomainParams,
+  CreateTransactionalSenderParams,
+  ListTransactionalSendersParams,
+  TransactionalDnsRecord,
+  TransactionalDnsRecordStatus,
+  TransactionalDomain,
+  TransactionalDomainList,
+  TransactionalDomainStatus,
+  TransactionalSender,
+  TransactionalSenderList,
+  TransactionalSenderState,
+  UpdateTransactionalSenderParams,
+} from "./transactional.js";
 export type {
   CreateWebhookParams,
   ListDeliveriesParams,

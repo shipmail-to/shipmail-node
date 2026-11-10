@@ -73,6 +73,38 @@ export type AutomationRun = {
   readonly status: "queued";
 };
 
+/**
+ * Why an automation would not run, in the order they are checked:
+ * - `automation_not_active`: its status is not active.
+ * - `no_active_version`: it has no active version.
+ * - `invalid_definition`: the stored version no longer validates.
+ * - `policy_version_outdated`: the active version was saved under an older Assistant policy; save it again.
+ * - `trigger_mailbox_outside_scope`: the trigger watches a mailbox the scope leaves out; a run on mail from it fails.
+ * - `owner_unavailable`: the person who owns it lost access.
+ * - `message_not_live`, `mailbox_not_in_trigger`, `message_in_junk`: only in a test result, about the message.
+ * - `models_disabled`: AI models are off for the organization or the platform, and it uses a semantic condition or writes replies.
+ * - `model_budget_exhausted`: the AI budget is used up.
+ */
+export type AutomationBlockedReason =
+  | "automation_not_active"
+  | "no_active_version"
+  | "invalid_definition"
+  | "policy_version_outdated"
+  | "trigger_mailbox_outside_scope"
+  | "owner_unavailable"
+  | "message_not_live"
+  | "mailbox_not_in_trigger"
+  | "message_in_junk"
+  | "models_disabled"
+  | "model_budget_exhausted";
+
+/**
+ * Why a Send-mode automation runs, but writes drafts instead of sending:
+ * - `automatic_send_disabled`: automatic sending is off for the organization.
+ * - `writing_style_required`: the writing style it drafts with (pinned when it was saved) has not passed its check.
+ */
+export type AutomationSendDegradedReason = "automatic_send_disabled" | "writing_style_required";
+
 export type Automation = {
   readonly object: "automation";
   readonly id: string;
@@ -83,8 +115,54 @@ export type Automation = {
   readonly definition: AutomationDefinition;
   readonly last_run: AutomationRunSummary | null;
   readonly next_run_at: string | null;
+  /** True when `blocked_reasons` is empty: it would run now. */
+  readonly runnable: boolean;
+  readonly blocked_reasons: readonly AutomationBlockedReason[];
+  /** Runs, but writes drafts instead of sending. Empty unless a Send-mode automation would only draft. */
+  readonly send_degraded_reasons: readonly AutomationSendDegradedReason[];
   readonly created_at: string;
   readonly updated_at: string;
+};
+
+export type TestAutomationParams = {
+  readonly mailbox_id: string;
+  /** An inbox message id in that mailbox. */
+  readonly message_id: string;
+};
+
+export type AutomationTestCondition = {
+  readonly index: number;
+  readonly type: AutomationCondition["type"];
+  /** Null when the condition was not evaluated. */
+  readonly matched: boolean | null;
+  /** The classifier's confidence for a semantic condition, else null. */
+  readonly confidence: number | null;
+  readonly not_evaluated_reason:
+    | "earlier_condition_failed"
+    | "models_disabled"
+    | "model_budget_exhausted"
+    | "classifier_failed"
+    | null;
+};
+
+/** A dry run of an automation on one stored message. Nothing is changed, queued or sent. */
+export type AutomationTest = {
+  readonly object: "automation_test";
+  readonly automation_id: string;
+  readonly mailbox_id: string;
+  readonly message_id: string;
+  readonly runnable: boolean;
+  readonly blocked_reasons: readonly AutomationBlockedReason[];
+  /** Runs, but writes drafts instead of sending. */
+  readonly send_degraded_reasons: readonly AutomationSendDegradedReason[];
+  readonly conditions: readonly AutomationTestCondition[];
+  /** Null when a condition could not be evaluated. */
+  readonly conditions_matched: boolean | null;
+  readonly would_run: boolean;
+  readonly mode: "draft" | "send";
+  readonly actions: readonly { readonly index: number; readonly type: AutomationAction["type"] }[];
+  /** Classifier calls this test made. They count against the AI budget. */
+  readonly model_calls: number;
 };
 
 export type CreateAutomationParams = {

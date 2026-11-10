@@ -184,6 +184,8 @@ const mockInboxMessages: InboxMessages = {
         review: null,
       },
       reply_text: "Accept your Linear invite",
+      category: "human",
+      out_of_office_until: null,
     },
   ],
   pagination: { limit: 10, total: 1, has_more: false, next_cursor: null },
@@ -251,6 +253,8 @@ const mockInboxThread: InboxThread = {
         review: null,
       },
       reply_text: "Hi",
+      category: "human",
+      out_of_office_until: null,
     },
   ],
 };
@@ -1035,6 +1039,64 @@ describe("Mailboxes", () => {
       expect(draft.bcc[0]?.address).toBe("log@example.com");
     });
 
+    test("corrects a new draft through its own path", async () => {
+      const client = createClient((input, init) => {
+        expect(init?.method).toBe("PATCH");
+        expect(new URL(String(input)).pathname).toBe(
+          "/v1/mailboxes/mbx_123/inbox/drafts/eml_draft",
+        );
+        expect(JSON.parse(init?.body as string)).toEqual({ text: "Hi Jane, thanks." });
+        return Response.json({ object: "inbox_draft", id: "eml_draft", message_id: "eml_draft_2" });
+      });
+
+      const draft = await client.mailboxes.updateInboxDraft("mbx_123", "eml_draft", {
+        text: "Hi Jane, thanks.",
+      });
+      expect(draft.id).toBe("eml_draft");
+      expect(draft.message_id).toBe("eml_draft_2");
+    });
+
+    test("reads and deletes a new draft through its own path", async () => {
+      const calls: string[] = [];
+      const client = createClient((input, init) => {
+        calls.push(`${init?.method} ${new URL(String(input)).pathname}`);
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        return Response.json({
+          object: "inbox_draft",
+          id: "eml_draft",
+          html: null,
+          text: "Hi Jane,",
+          attachments: [{ id: "blob_1", name: "a.pdf", type: "application/pdf", size: 10 }],
+        });
+      });
+
+      const draft = await client.mailboxes.getInboxDraft("mbx_123", "eml_draft");
+      expect(draft.text).toBe("Hi Jane,");
+      expect(draft.attachments[0]?.id).toBe("blob_1");
+      await client.mailboxes.deleteInboxDraft("mbx_123", "eml_draft");
+      expect(calls).toEqual([
+        "GET /v1/mailboxes/mbx_123/inbox/drafts/eml_draft",
+        "DELETE /v1/mailboxes/mbx_123/inbox/drafts/eml_draft",
+      ]);
+    });
+
+    test("replaces a reply draft's files without a body", async () => {
+      const client = createClient((input, init) => {
+        expect(init?.method).toBe("PATCH");
+        expect(new URL(String(input)).pathname).toBe(
+          "/v1/mailboxes/mbx_123/inbox/threads/thd_1/drafts/drf_1",
+        );
+        expect(JSON.parse(String(init?.body))).toEqual({
+          attachments: [{ id: "blob_1" }, { staged_attachment_id: "sat_2" }],
+        });
+        return Response.json({ object: "inbox_reply_draft", id: "drf_1" });
+      });
+
+      await client.mailboxes.updateInboxReplyDraft("mbx_123", "thd_1", "drf_1", {
+        attachments: [{ id: "blob_1" }, { staged_attachment_id: "sat_2" }],
+      });
+    });
+
     test("replies to a JMAP inbox message within its mailbox", async () => {
       const client = createClient((input, init) => {
         expect(init?.method).toBe("POST");
@@ -1139,6 +1201,20 @@ describe("Mailboxes", () => {
         name: "invoice.pdf",
       });
       expect([...result]).toEqual([1, 2, 3]);
+    });
+
+    test("downloads a stored message as raw bytes", async () => {
+      const raw = "From: jane@example.com\r\nSubject: Hi\r\n\r\nHello";
+      const client = createClient((input, init) => {
+        expect(init?.method).toBe("GET");
+        expect(new URL(String(input)).pathname).toBe(
+          "/v1/mailboxes/mbx_123/inbox/messages/eml_123/raw",
+        );
+        return new Response(raw, { headers: { "Content-Type": "message/rfc822" } });
+      });
+
+      const bytes = await client.mailboxes.downloadInboxMessageRaw("mbx_123", "eml_123");
+      expect(new TextDecoder().decode(bytes)).toBe(raw);
     });
   });
 

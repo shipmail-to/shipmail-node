@@ -15,6 +15,10 @@ describe("Capabilities", () => {
         resource_semantics: "legacy-intersection",
       },
       allowed_mcp_tools: ["shipmail_list_messages", "shipmail_send_message"],
+      organization: {
+        default_timezone: "Europe/Lisbon",
+        ai: { models_enabled: true, automatic_send_enabled: false },
+      },
     };
     const client = new ShipmailClient({
       apiKey: "sm_live_test",

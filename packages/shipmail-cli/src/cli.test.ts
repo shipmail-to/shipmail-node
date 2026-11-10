@@ -80,6 +80,8 @@ describe("shipmail CLI", () => {
     expect(stdout.text()).toContain("--track-engagement <true|false>");
     expect(stdout.text()).toContain("--publish-target <email_and_website|email|website>");
     expect(stdout.text()).toContain("--add-utm-tags <true|false>");
+    expect(stdout.text()).toContain("--view-in-browser <true|false>");
+    expect(stdout.text()).toContain("--view-in-browser-default <true|false>");
     expect(stdout.text()).toContain("accept bare text or sanitized inline HTML");
   });
 
@@ -211,7 +213,7 @@ describe("shipmail CLI", () => {
         captured = { url: new URL(String(input)), init };
         return jsonResponse({
           object: "organization_access",
-          organization: { id: "org_1", name: "Acme" },
+          organization: { id: "org_1", name: "Acme", default_timezone: null },
           plan: "free",
           has_access: false,
           trial: { active: false, ends_at: null, eligible: true },
@@ -224,6 +226,66 @@ describe("shipmail CLI", () => {
     expect(code).toBe(0);
     expect(captured?.url.href).toBe("https://shipmail.to/api/v1/organization/access");
     expect(stdout.text()).toContain('"has_access": false');
+  });
+
+  test("clears the organization's default time zone with none", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["organization", "update", "--default-timezone", "none"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({
+          object: "organization",
+          id: "org_1",
+          name: "Acme",
+          default_timezone: null,
+        });
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("PATCH");
+    expect(captured?.url.href).toBe("https://shipmail.to/api/v1/organization");
+    expect(JSON.parse(String(captured?.init?.body))).toEqual({ default_timezone: null });
+  });
+
+  test("updates the models switch", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      ["organization", "ai-settings", "update", "--models-enabled", "false"],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({
+            object: "organization_ai_settings",
+            models_enabled: false,
+            automatic_send_enabled: false,
+            effective: { models_enabled: false, automatic_send_enabled: false },
+          });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("PATCH");
+    expect(captured?.url.href).toBe("https://shipmail.to/api/v1/organization/ai-settings");
+    expect(JSON.parse(String(captured?.init?.body))).toEqual({ models_enabled: false });
+  });
+
+  test("refuses an AI settings update without a switch", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["organization", "ai-settings", "update"], {
+      stdout: createOutput().out,
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () => jsonResponse({})),
+    });
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Pass --models-enabled true|false");
   });
 
   test("prints the owner's link on a refusal the owner can lift", async () => {
@@ -392,6 +454,125 @@ describe("shipmail CLI", () => {
     expect(captured?.url.pathname).toBe("/api/v1/suppressions");
     expect(captured?.url.searchParams.get("scope")).toBe("marketing");
     expect(stdout.text()).toBe(`${JSON.stringify(response, null, 2)}\n`);
+  });
+
+  test("lists newsletter opt-outs filtered by reason", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["suppressions", "list", "--reason", "unsubscribe"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({ data: [], pagination: { next_cursor: null, has_more: false } });
+      }),
+    });
+    expect(code).toBe(0);
+    expect(captured?.url.searchParams.get("reason")).toBe("unsubscribe");
+
+    const stderr = createOutput();
+    const invalid = await runCli(["suppressions", "list", "--reason", "bounced"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () => jsonResponse({})),
+    });
+    expect(invalid).not.toBe(0);
+    expect(stderr.text()).toContain(
+      "--reason must be one of: hard_bounce, complaint, manual, soft_bounce, unsubscribe.",
+    );
+  });
+
+  test("lifts a newsletter opt-out with fresh consent", async () => {
+    let captured: CapturedRequest | undefined;
+    const stdout = createOutput();
+    const lift = {
+      object: "newsletter_opt_out_lift",
+      email_address: "reader@example.com",
+      consent_source: "Asked to rejoin by email",
+      consent_attested_at: "2026-11-09T10:00:00.000Z",
+      opted_out_at: "2026-10-01T08:00:00.000Z",
+      newsletter_id: null,
+    };
+    const code = await runCli(
+      [
+        "suppressions",
+        "resubscribe",
+        "reader@example.com",
+        "--consent-source",
+        "Asked to rejoin by email",
+      ],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse(lift);
+        }),
+      },
+    );
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("POST");
+    expect(captured?.url.pathname).toBe(
+      "/api/v1/newsletter-opt-outs/reader%40example.com/resubscribe",
+    );
+    expect(JSON.parse(String(captured?.init?.body))).toEqual({
+      consent_source: "Asked to rejoin by email",
+    });
+    expect(JSON.parse(stdout.text())).toEqual(lift);
+
+    const stderr = createOutput();
+    const missing = await runCli(["suppressions", "resubscribe", "reader@example.com"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () => jsonResponse({})),
+    });
+    expect(missing).not.toBe(0);
+    expect(stderr.text()).toContain("--consent-source");
+  });
+
+  test("prints the removal when a newsletter opt-out remains", async () => {
+    const stdout = createOutput();
+    const removal = {
+      object: "suppression_removal",
+      email_address: "reader@example.com",
+      removed: true,
+      newsletter_optout_remains: true,
+      message: "The suppression was removed. The newsletter opt-out remains.",
+    };
+    const code = await runCli(["suppressions", "remove", "reader@example.com"], {
+      stdout: stdout.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () => jsonResponse(removal)),
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.text())).toEqual(removal);
+  });
+
+  test("prints the consent_opt_out detail when only an opt-out exists", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["suppressions", "remove", "reader@example.com"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_live_test" },
+      fetch: stubFetch(async () =>
+        jsonResponse(
+          {
+            error: {
+              type: "conflict",
+              message: "This address unsubscribed from your newsletters.",
+              details: [
+                {
+                  field: "email",
+                  code: "consent_opt_out",
+                  message: "Resubscribe the subscriber instead.",
+                },
+              ],
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    });
+    expect(code).not.toBe(0);
+    expect(stderr.text()).toContain("email: Resubscribe the subscriber instead. (consent_opt_out)");
   });
 
   test("lists suppressions of a stream scope but adds only all or marketing", async () => {
@@ -1025,6 +1206,29 @@ describe("shipmail CLI", () => {
     expect(await readJsonBody(requests[0]?.init)).toEqual({
       name: "Daily brief",
       definition,
+    });
+  });
+
+  test("tests an automation on one message", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(
+      ["automations", "test", "aaut_1", "--mailbox-id", "mbx_1", "--message-id", "eml_1"],
+      {
+        stdout: createOutput().out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({ object: "automation_test", would_run: true });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.init?.method).toBe("POST");
+    expect(captured?.url.pathname).toBe("/api/v1/automations/aaut_1/test");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      mailbox_id: "mbx_1",
+      message_id: "eml_1",
     });
   });
 
@@ -1979,6 +2183,115 @@ describe("shipmail CLI", () => {
     ]);
   });
 
+  test("sets up transactional domains", async () => {
+    const requests: CapturedRequest[] = [];
+    const stdout = createOutput();
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "GET" && new URL(String(input)).pathname.endsWith("domains")) {
+        return jsonResponse({ object: "list", data: [] });
+      }
+      return jsonResponse({ object: "transactional_domain", id: "txdom_123" });
+    });
+
+    for (const args of [
+      ["transactional-domains", "list"],
+      ["transactional-domains", "create", "--root-domain", "example.com", "--subdomain", "mail"],
+      ["transactional-domains", "get", "txdom_123"],
+      ["transactional-domains", "verify", "txdom_123"],
+      ["transactional-domains", "delete", "txdom_123"],
+    ]) {
+      await runCli(args, { stdout: stdout.out, env, fetch });
+    }
+
+    expect(requests.map((request) => `${request.init?.method} ${request.url.pathname}`)).toEqual([
+      "GET /v1/transactional-domains",
+      "POST /v1/transactional-domains",
+      "GET /v1/transactional-domains/txdom_123",
+      "POST /v1/transactional-domains/txdom_123/verify",
+      "DELETE /v1/transactional-domains/txdom_123",
+    ]);
+    expect(await readJsonBody(requests[1]?.init)).toEqual({
+      root_domain: "example.com",
+      subdomain: "mail",
+    });
+  });
+
+  test("lists, creates, gets, and updates transactional senders", async () => {
+    const requests: CapturedRequest[] = [];
+    const stdout = createOutput();
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      if (init?.method === "GET" && new URL(String(input)).pathname.endsWith("senders")) {
+        return jsonResponse({ object: "list", data: [] });
+      }
+      return jsonResponse({ object: "transactional_sender", id: "txbind_123" });
+    });
+
+    for (const args of [
+      ["transactional-senders", "list", "--domain-id", "txdom_123"],
+      [
+        "transactional-senders",
+        "create",
+        "--domain-id",
+        "txdom_123",
+        "--mailbox-id",
+        "mbx_123",
+        "--local-part",
+        "hello",
+        "--display-name",
+        "Acme",
+      ],
+      ["transactional-senders", "get", "txbind_123"],
+      [
+        "transactional-senders",
+        "update",
+        "txbind_123",
+        "--state",
+        "disabled",
+        "--refuse-disposable",
+        "true",
+      ],
+    ]) {
+      await runCli(args, { stdout: stdout.out, env, fetch });
+    }
+
+    expect(requests.map((request) => `${request.init?.method} ${request.url.pathname}`)).toEqual([
+      "GET /v1/transactional-senders",
+      "POST /v1/transactional-senders",
+      "GET /v1/transactional-senders/txbind_123",
+      "PATCH /v1/transactional-senders/txbind_123",
+    ]);
+    expect(requests[0]?.url.searchParams.get("domain_id")).toBe("txdom_123");
+    expect(await readJsonBody(requests[1]?.init)).toEqual({
+      domain_id: "txdom_123",
+      mailbox_id: "mbx_123",
+      local_part: "hello",
+      display_name: "Acme",
+    });
+    expect(await readJsonBody(requests[3]?.init)).toEqual({
+      state: "disabled",
+      refuse_disposable: true,
+    });
+  });
+
+  test("refuses a transactional sender update with nothing to change", async () => {
+    const stderr = createOutput();
+    const fetch = stubFetch(async () => jsonResponse({}));
+
+    const code = await runCli(["transactional-senders", "update", "txbind_123"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_test" },
+      fetch,
+    });
+
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Provide --state, --mailbox-id or --refuse-disposable.");
+  });
+
   test("lists, creates, and revokes SMTP credentials", async () => {
     const requests: CapturedRequest[] = [];
     const stdout = createOutput();
@@ -2846,6 +3159,123 @@ describe("shipmail CLI", () => {
     });
   });
 
+  test("corrects a saved draft with only the fields it names", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+    const fetch = stubFetch(async (input, init) => {
+      captured = { url: new URL(String(input)), init };
+      return jsonResponse({ object: "inbox_draft", id: "eml_1", message_id: "eml_2" });
+    });
+
+    const code = await runCli(
+      [
+        "inbox",
+        "update-compose-draft",
+        "mbx_123",
+        "eml_1",
+        "--subject",
+        "Kickoff",
+        "--text",
+        "Fixed",
+      ],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+        fetch,
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/v1/mailboxes/mbx_123/inbox/drafts/eml_1");
+    expect(captured?.init?.method).toBe("PATCH");
+    expect(await readJsonBody(captured?.init)).toEqual({ subject: "Kickoff", text: "Fixed" });
+  });
+
+  test("prints a stored message as raw MIME", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["inbox", "raw", "mbx_123", "eml_1"], {
+      stdout: stdout.out,
+      env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return new Response("Subject: Hi\r\n\r\nHello", {
+          headers: { "Content-Type": "message/rfc822" },
+        });
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/v1/mailboxes/mbx_123/inbox/messages/eml_1/raw");
+    expect(stdout.text()).toBe("Subject: Hi\r\n\r\nHello");
+  });
+
+  test("reads, deletes and replaces the files of saved drafts", async () => {
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return jsonResponse({ object: "inbox_draft", id: "eml_1" });
+    });
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+    const out = createOutput().out;
+
+    expect(
+      await runCli(["inbox", "get-compose-draft", "mbx_123", "eml_1"], { stdout: out, env, fetch }),
+    ).toBe(0);
+    expect(
+      await runCli(
+        [
+          "inbox",
+          "update-compose-draft",
+          "mbx_123",
+          "eml_1",
+          "--keep-attachment",
+          "blob_1",
+          "--staged-attachment-id",
+          "sat_2",
+        ],
+        { stdout: out, env, fetch },
+      ),
+    ).toBe(0);
+    expect(
+      await runCli(["inbox", "update-draft", "mbx_123", "thr_1", "drf_1", "--clear-attachments"], {
+        stdout: out,
+        env,
+        fetch,
+      }),
+    ).toBe(0);
+    expect(
+      await runCli(["inbox", "delete-compose-draft", "mbx_123", "eml_1"], {
+        stdout: out,
+        env,
+        fetch,
+      }),
+    ).toBe(0);
+
+    expect(
+      requests.map((request) => `${request.init?.method ?? "GET"} ${request.url.pathname}`),
+    ).toEqual([
+      "GET /v1/mailboxes/mbx_123/inbox/drafts/eml_1",
+      "PATCH /v1/mailboxes/mbx_123/inbox/drafts/eml_1",
+      "PATCH /v1/mailboxes/mbx_123/inbox/threads/thr_1/drafts/drf_1",
+      "DELETE /v1/mailboxes/mbx_123/inbox/drafts/eml_1",
+    ]);
+    expect(await readJsonBody(requests[1]?.init)).toEqual({
+      attachments: [{ id: "blob_1" }, { staged_attachment_id: "sat_2" }],
+    });
+    expect(await readJsonBody(requests[2]?.init)).toEqual({ attachments: [] });
+  });
+
+  test("rejects a draft correction that changes nothing", async () => {
+    const stderr = createOutput();
+    const code = await runCli(["inbox", "update-compose-draft", "mbx_123", "eml_1"], {
+      stderr: stderr.out,
+      env: { SHIPMAIL_API_KEY: "sm_test" },
+    });
+    expect(code).toBe(1);
+  });
+
   test("rejects an inbox compose-draft without a body", async () => {
     const stderr = createOutput();
 
@@ -2942,6 +3372,191 @@ describe("shipmail CLI", () => {
     expect(captured?.init?.method).toBe("GET");
     expect(headersFrom(captured?.init).get("authorization")).toBe("Bearer sm_test");
     expect(JSON.parse(stdout.text()).data[0].id).toBe("nwsid_123");
+  });
+
+  test("gets one newsletter domain and one sender identity", async () => {
+    const paths: string[] = [];
+    const fetch = stubFetch(async (input) => {
+      paths.push(new URL(String(input)).pathname);
+      return jsonResponse({ id: "x" });
+    });
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+
+    expect(
+      await runCli(["newsletter-domains", "get", "nwsdom_1"], {
+        stdout: createOutput().out,
+        env,
+        fetch,
+      }),
+    ).toBe(0);
+    expect(
+      await runCli(["newsletter-sender-identities", "get", "nwsid_1"], {
+        stdout: createOutput().out,
+        env,
+        fetch,
+      }),
+    ).toBe(0);
+    expect(paths).toEqual([
+      "/v1/newsletter-domains/nwsdom_1",
+      "/v1/newsletter-sender-identities/nwsid_1",
+    ]);
+  });
+
+  test("previews a newsletter for one subscriber", async () => {
+    let captured: CapturedRequest | undefined;
+    const code = await runCli(["newsletters", "preview", "nws_1", "--subscriber-id", "audmem_1"], {
+      stdout: createOutput().out,
+      env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+      fetch: stubFetch(async (input, init) => {
+        captured = { url: new URL(String(input)), init };
+        return jsonResponse({ object: "newsletter_preview", subject: "Hi" });
+      }),
+    });
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/v1/newsletters/nws_1/preview");
+    expect(await readJsonBody(captured?.init)).toEqual({
+      preview_as: { type: "subscriber", subscriber_id: "audmem_1" },
+    });
+  });
+
+  test("lists a newsletter's recipients and finds one by email", async () => {
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      return jsonResponse({ data: [], pagination: { next_cursor: null, has_more: false } });
+    });
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+
+    const listed = await runCli(
+      [
+        "newsletters",
+        "recipients",
+        "list",
+        "nws_1",
+        "--status",
+        "skipped",
+        "--reason",
+        "opted_out",
+        "--limit",
+        "10",
+      ],
+      { stdout: createOutput().out, env, fetch },
+    );
+    const found = await runCli(
+      ["newsletters", "recipients", "by-email", "nws_1", "reader@example.com"],
+      { stdout: createOutput().out, env, fetch },
+    );
+
+    expect(listed).toBe(0);
+    expect(found).toBe(0);
+    expect(requests[0]?.url.href).toBe(
+      "https://api.shipmail.to/v1/newsletters/nws_1/recipients?limit=10&status=skipped&reason=opted_out",
+    );
+    expect(requests[1]?.url.pathname).toBe(
+      "/v1/newsletters/nws_1/recipients/by-email/reader%40example.com",
+    );
+
+    const stderr = createOutput();
+    const invalid = await runCli(
+      ["newsletters", "recipients", "list", "nws_1", "--status", "opened"],
+      { stderr: stderr.out, env, fetch },
+    );
+    expect(invalid).not.toBe(0);
+    expect(stderr.text()).toContain("--status must be one of: pending,");
+  });
+
+  test("sets up, verifies and deletes a newsletter domain", async () => {
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse({ object: "newsletter_domain", id: "nwsdom_1", dns_records: [] });
+    });
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+
+    const create = await runCli(
+      [
+        "newsletter-domains",
+        "create",
+        "--root-domain",
+        "example.com",
+        "--reply-to-address",
+        "hello@example.com",
+        "--subdomain",
+        "news",
+      ],
+      { stdout: createOutput().out, env, fetch },
+    );
+    const verify = await runCli(["newsletter-domains", "verify", "nwsdom_1"], {
+      stdout: createOutput().out,
+      env,
+      fetch,
+    });
+    const remove = await runCli(["newsletter-domains", "delete", "nwsdom_1"], {
+      stdout: createOutput().out,
+      env,
+      fetch,
+    });
+
+    expect([create, verify, remove]).toEqual([0, 0, 0]);
+    expect(requests.map((r) => [r.init?.method, r.url.pathname])).toEqual([
+      ["POST", "/v1/newsletter-domains"],
+      ["POST", "/v1/newsletter-domains/nwsdom_1/verify"],
+      ["DELETE", "/v1/newsletter-domains/nwsdom_1"],
+    ]);
+    expect(await readJsonBody(requests[0]?.init)).toEqual({
+      root_domain: "example.com",
+      reply_to_address: "hello@example.com",
+      subdomain: "news",
+    });
+  });
+
+  test("creates, updates and deletes a newsletter sender identity", async () => {
+    const requests: CapturedRequest[] = [];
+    const fetch = stubFetch(async (input, init) => {
+      requests.push({ url: new URL(String(input)), init });
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse({ object: "newsletter_sender_identity", id: "nwsid_1" });
+    });
+    const env = { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" };
+
+    const create = await runCli(
+      [
+        "newsletter-sender-identities",
+        "create",
+        "--newsletter-domain-id",
+        "nwsdom_1",
+        "--from-name",
+        "Acme",
+        "--business-name",
+        "Acme Ltd.",
+      ],
+      { stdout: createOutput().out, env, fetch },
+    );
+    const update = await runCli(
+      ["newsletter-sender-identities", "update", "nwsid_1", "--make-default", "true"],
+      { stdout: createOutput().out, env, fetch },
+    );
+    const remove = await runCli(["newsletter-sender-identities", "delete", "nwsid_1"], {
+      stdout: createOutput().out,
+      env,
+      fetch,
+    });
+
+    expect([create, update, remove]).toEqual([0, 0, 0]);
+    expect(requests.map((r) => [r.init?.method, r.url.pathname])).toEqual([
+      ["POST", "/v1/newsletter-sender-identities"],
+      ["PATCH", "/v1/newsletter-sender-identities/nwsid_1"],
+      ["DELETE", "/v1/newsletter-sender-identities/nwsid_1"],
+    ]);
+    expect(await readJsonBody(requests[0]?.init)).toEqual({
+      newsletter_domain_id: "nwsdom_1",
+      from_name: "Acme",
+      business_name: "Acme Ltd.",
+    });
+    expect(await readJsonBody(requests[1]?.init)).toEqual({ make_default: true });
   });
 
   test("registers newsletter assets from existing CDN URLs", async () => {
@@ -3093,7 +3708,7 @@ describe("shipmail CLI", () => {
         "--subject",
         "What shipped in July",
         "--blocks",
-        '[{"type":"heading","level":1,"text":"July updates"},{"type":"paragraph","body":"Read the <a href=\\"https://example.com/launch\\">launch notes</a>."}]',
+        '[{"type":"heading","level":1,"text":"July updates"},{"type":"paragraph","body":"Read the <a href=\\"https://example.com/launch\\">launch notes</a>."},{"type":"event","event_id":"nwsevt_abcdefghijklmnopqrstuvwx"}]',
         "--send-window-hours",
         "6",
         "--feed-entry-url",
@@ -3104,6 +3719,8 @@ describe("shipmail CLI", () => {
         "true",
         "--add-utm-tags",
         "true",
+        "--view-in-browser",
+        "false",
       ],
       {
         stdout: stdout.out,
@@ -3132,12 +3749,14 @@ describe("shipmail CLI", () => {
           type: "paragraph",
           body: 'Read the <a href="https://example.com/launch">launch notes</a>.',
         },
+        { type: "event", event_id: "nwsevt_abcdefghijklmnopqrstuvwx" },
       ],
       send_window_hours: 6,
       feed_entry_url: "https://example.com/",
       styling_mode: "plain",
       track_engagement: true,
       add_utm_tags: true,
+      view_in_browser: false,
     });
     expect(JSON.parse(stdout.text()).id).toBe("nws_123");
   });
@@ -3228,6 +3847,8 @@ describe("shipmail CLI", () => {
         "false",
         "--add-utm-tags",
         "false",
+        "--view-in-browser",
+        "true",
       ],
       {
         stdout: stdout.out,
@@ -3248,6 +3869,7 @@ describe("shipmail CLI", () => {
       styling_mode: "styled",
       track_engagement: false,
       add_utm_tags: false,
+      view_in_browser: true,
     });
   });
 
@@ -3453,13 +4075,54 @@ describe("shipmail CLI", () => {
         "true",
         "--cleanup-inactive-days",
         "90",
+        "--view-in-browser-default",
+        "false",
       ]),
     ).toBe(0);
     expect(await Promise.all(requests.map((request) => readJsonBody(request.init)))).toEqual([
       { subject_b: "Another subject", subject_test_percent: 15 },
       { subject_b: null },
-      { cleanup_enabled: true, cleanup_inactive_days: 90 },
+      { view_in_browser_default: false, cleanup_enabled: true, cleanup_inactive_days: 90 },
     ]);
+  });
+
+  test("sets and clears an audience's email wording", async () => {
+    const requests: CapturedRequest[] = [];
+    const stderr = createOutput();
+    const run = (args: readonly string[]) =>
+      runCli([...args], {
+        stdout: createOutput().out,
+        stderr: stderr.out,
+        env: { SHIPMAIL_API_KEY: "sm_test", SHIPMAIL_BASE_URL: "https://api.shipmail.to/v1" },
+        fetch: stubFetch(async (input, init) => {
+          requests.push({ url: new URL(String(input)), init });
+          return jsonResponse({ object: "audience", id: "aud_1" });
+        }),
+      });
+    const copy = {
+      fr: { subject: "Confirmez votre inscription", message: "Un clic et c'est fait." },
+    };
+
+    expect(
+      await run([
+        "audiences",
+        "update",
+        "aud_1",
+        "--confirmation-email-copy",
+        JSON.stringify(copy),
+        "--last-chance-email-copy",
+        "null",
+      ]),
+    ).toBe(0);
+    expect(
+      await run(["audiences", "update", "aud_1", "--confirmation-email-copy", '{"de":{}}']),
+    ).toBe(1);
+    expect(requests.map((request) => request.url.pathname)).toEqual(["/v1/audiences/aud_1"]);
+    expect(await readJsonBody(requests[0]?.init)).toEqual({
+      confirmation_email_copy: copy,
+      last_chance_email_copy: null,
+    });
+    expect(stderr.text()).toContain("--confirmation-email-copy must be null or a JSON object");
   });
 
   test("cancels and resumes newsletters", async () => {
@@ -3775,6 +4438,8 @@ describe("shipmail CLI", () => {
         "1020",
         "--timezone",
         "America/New_York",
+        "--lock-timezone",
+        "true",
         "--conferencing-provider",
         "google_meet",
       ],
@@ -3800,9 +4465,37 @@ describe("shipmail CLI", () => {
       window_start_minutes: 540,
       window_end_minutes: 1020,
       timezone: "America/New_York",
+      lock_timezone: true,
       conferencing_provider: "google_meet",
     });
     expect(JSON.parse(stdout.text()).id).toBe("bkp_1");
+  });
+
+  test("reads a booking page's slots", async () => {
+    const stdout = createOutput();
+    let captured: CapturedRequest | undefined;
+
+    const code = await runCli(
+      ["booking-pages", "slots", "bkp_1", "--from", "2026-11-09T00:00:00Z"],
+      {
+        stdout: stdout.out,
+        env: { SHIPMAIL_API_KEY: "sm_live_test" },
+        fetch: stubFetch(async (input, init) => {
+          captured = { url: new URL(String(input)), init };
+          return jsonResponse({
+            object: "booking_page_slots",
+            booking_page_id: "bkp_1",
+            slots: [],
+          });
+        }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(captured?.url.pathname).toBe("/api/v1/booking-pages/bkp_1/slots");
+    expect(captured?.url.searchParams.get("from")).toBe("2026-11-09T00:00:00Z");
+    expect(captured?.url.searchParams.has("to")).toBe(false);
+    expect(JSON.parse(stdout.text()).object).toBe("booking_page_slots");
   });
 
   test("lists, gets, and updates booking pages", async () => {

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import { ShipmailClient } from "../../client.js";
-import type { CalendarAvailability, CalendarEvent } from "../../types/calendar.js";
+import type {
+  CalendarAvailability,
+  CalendarEvent,
+  CalendarInvitationSkip,
+} from "../../types/calendar.js";
 import type { PaginatedResponse } from "../../types/common.js";
 
 function createClient(
@@ -47,9 +51,14 @@ const mockEvent: CalendarEvent = {
   created_at: null,
   updated_at: null,
 };
+const skipped: CalendarInvitationSkip = {
+  recipient: "guest@example.com",
+  reason: "send_invitations_false",
+};
 const mockMutationEvent = {
   ...mockEvent,
   invitation_outcomes: [],
+  invitation_skipped: [],
   invitation_failures: [],
 };
 
@@ -67,7 +76,7 @@ describe("Calendar.events", () => {
         start: "2026-08-01T14:00:00",
         attendees: [{ email: "guest@example.com", name: "Guest" }],
       });
-      return Response.json(mockMutationEvent);
+      return Response.json({ ...mockMutationEvent, invitation_skipped: [skipped] });
     });
 
     const event = await client.calendar.events.create({
@@ -81,6 +90,8 @@ describe("Calendar.events", () => {
     });
     expect(event.id).toBe("evt_1");
     expect(event.invitation_outcomes).toEqual([]);
+    expect(event.invitation_skipped).toEqual([skipped]);
+    expect(event.invitation_failures).toEqual([]);
   });
 
   test("list forwards mailbox, from, to as query params", async () => {

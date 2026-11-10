@@ -14,6 +14,7 @@ import {
   type CalendarAvailabilityParams,
   CONFERENCING_PROVIDER_IDS,
   type ConferencingProviderId,
+  ConflictError,
   type CreateBookingLinkParams,
   type CreateBookingPageParams,
   type CreateCalendarEventParams,
@@ -22,11 +23,15 @@ import {
   type CreateTemplateParams,
   type DomainHealth,
   type DomainHealthProvider,
+  type DraftAttachmentSelection,
+  type EmailCopy,
   type EmailRecipientInput,
   type InviteMemberParams,
   type ListCalendarEventsParams,
   type ListDeliveriesParams,
   type ListSubscribersParams,
+  NEWSLETTER_RECIPIENT_REASONS,
+  NEWSLETTER_RECIPIENT_STATUSES,
   type NewsletterAssetContentType,
   type NewsletterAssetUpload,
   type NewsletterBlock,
@@ -113,6 +118,7 @@ const NEWSLETTER_BLOCK_TYPES: readonly string[] = [
   "divider",
   "spacer",
   "code",
+  "event",
   "custom_html",
 ] satisfies readonly NewsletterBlock["type"][];
 const WEBHOOK_EVENT_TYPE_SET = new Set<string>(WEBHOOK_EVENT_TYPES);
@@ -222,6 +228,26 @@ function getBoolean(options: ParsedArgs["options"], key: string): boolean | unde
   if (raw === "true" || raw === "1" || raw === "yes") return true;
   if (raw === "false" || raw === "0" || raw === "no") return false;
   throw new CliUsageError(`--${key} must be true or false.`);
+}
+
+// The files a draft keeps after an update: kept ids first, then staged uploads. Without any of the
+// options the draft's files stay as they are.
+function draftAttachmentsParam(options: ParsedArgs["options"]): {
+  readonly attachments?: readonly DraftAttachmentSelection[];
+} {
+  const keep = getStringList(options, "keep-attachment");
+  const staged = getStringList(options, "staged-attachment-id");
+  const clear = getBoolean(options, "clear-attachments") === true;
+  if (clear && (keep.length > 0 || staged.length > 0)) {
+    throw new CliUsageError("--clear-attachments cannot be combined with other file options.");
+  }
+  if (!clear && keep.length === 0 && staged.length === 0) return {};
+  return {
+    attachments: [
+      ...keep.map((id) => ({ id })),
+      ...staged.map((stagedId) => ({ staged_attachment_id: stagedId })),
+    ],
+  };
 }
 
 function splitValues(value: string | boolean): readonly string[] {
@@ -593,6 +619,42 @@ async function segmentDefinition(value: string | undefined): Promise<SegmentDefi
   return parsed;
 }
 
+const EMAIL_COPY_LOCALES = ["en", "fr", "es"] as const;
+
+function isEmailCopy(value: unknown): value is EmailCopy {
+  if (!isJsonObject(value)) return false;
+  for (const key in value) {
+    if (!EMAIL_COPY_LOCALES.some((locale) => locale === key)) return false;
+    const entry = value[key];
+    if (
+      !isJsonObject(entry) ||
+      typeof entry["subject"] !== "string" ||
+      typeof entry["message"] !== "string"
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// --confirmation-email-copy '{"en":{"subject":"...","message":"..."}}' or @file.json; null clears
+// it. The API applies the wording rules.
+async function emailCopyOption(
+  options: ParsedArgs["options"],
+  name: string,
+): Promise<EmailCopy | null | undefined> {
+  const value = getString(options, name);
+  if (value === undefined) return undefined;
+  const parsed = await readJsonInput(value);
+  if (parsed === null) return null;
+  if (!isEmailCopy(parsed)) {
+    throw new CliUsageError(
+      `--${name} must be null or a JSON object keyed by en, fr or es, each with a subject and a message.`,
+    );
+  }
+  return parsed;
+}
+
 async function automationDefinition(value: string | undefined): Promise<AutomationDefinition> {
   const parsed = await readJsonInput(value);
   if (!isAutomationDefinition(parsed)) {
@@ -640,6 +702,7 @@ async function newsletterCreateParams(
   const styling_mode = parseStylingMode(options);
   const track_engagement = getBoolean(options, "track-engagement");
   const add_utm_tags = getBoolean(options, "add-utm-tags");
+  const view_in_browser = getBoolean(options, "view-in-browser");
   const preview_text = getString(options, "preview-text");
   const subjectTest = subjectTestParams(options);
 
@@ -660,6 +723,7 @@ async function newsletterCreateParams(
     ...(styling_mode !== undefined ? { styling_mode } : {}),
     ...(track_engagement !== undefined ? { track_engagement } : {}),
     ...(add_utm_tags !== undefined ? { add_utm_tags } : {}),
+    ...(view_in_browser !== undefined ? { view_in_browser } : {}),
     ...subjectTest,
   };
 }
@@ -700,6 +764,7 @@ async function newsletterUpdateParams(
   const styling_mode = parseStylingMode(options);
   const track_engagement = getBoolean(options, "track-engagement");
   const add_utm_tags = getBoolean(options, "add-utm-tags");
+  const view_in_browser = getBoolean(options, "view-in-browser");
 
   const blocksInput = getString(options, "blocks");
   const bodyHtmlInput = getString(options, "body-html");
@@ -727,6 +792,7 @@ async function newsletterUpdateParams(
     ...(styling_mode !== undefined ? { styling_mode } : {}),
     ...(track_engagement !== undefined ? { track_engagement } : {}),
     ...(add_utm_tags !== undefined ? { add_utm_tags } : {}),
+    ...(view_in_browser !== undefined ? { view_in_browser } : {}),
     ...subjectTestParams(options),
   };
 
@@ -835,12 +901,17 @@ Usage:
   shipmail status
   shipmail capabilities
   shipmail organization access
+  shipmail organization get
+  shipmail organization update --default-timezone Europe/Paris|none
+  shipmail organization ai-settings get
+  shipmail organization ai-settings update --models-enabled true|false
   shipmail api <METHOD> <PATH> [--data JSON|@file] [--output file]
   shipmail automations list
   shipmail automations create --name "Daily brief" --definition JSON|@file [--idempotency-key key]
   shipmail automations get <id>
   shipmail automations update <id> [--name "..."] [--definition JSON|@file] [--status active|paused|disabled] [--idempotency-key key]
   shipmail automations run <id> [--idempotency-key key]
+  shipmail automations test <id> --mailbox-id mbx --message-id eml  (dry run on one stored message; needs messages:read too)
   shipmail domains list [--limit 25] [--cursor cur]
   shipmail domains search <keyword>
   shipmail domains create <name>
@@ -882,15 +953,19 @@ Usage:
   shipmail members mailboxes revoke <member-id> <mailbox-id>
   shipmail inbox list <mailbox-id> [--folder-role inbox] [--search text] [--from text] [--to text] [--subject text] [--has-attachment [true|false]] [--after ISO] [--before ISO] [--limit 25] [--cursor cur]
   shipmail inbox message <mailbox-id> <message-id>
+  shipmail inbox raw <mailbox-id> <message-id> [--output message.eml]  (the stored message as .eml; --output keeps the exact bytes)
   shipmail inbox security-review <mailbox-id> <message-id> --reason "Reviewed" --expected-content-sha256 HASH
   shipmail inbox threads <mailbox-id> [--attention-state needs_reply] [--after ISO] [--before ISO] [--limit 25] [--cursor cur]
   shipmail inbox thread <mailbox-id> <thread-id>
   shipmail inbox thread-attention <mailbox-id> <thread-id> --done true --expected-version 3
   shipmail inbox draft <mailbox-id> <thread-id> --expected-version 3 (--text "Hello" | --html "<p>Hello</p>") [--reply-mode reply_all] [--staged-attachment-id sat_...]
   shipmail inbox compose-draft <mailbox-id> --to user@example.com [--cc ...] [--bcc ...] [--subject "Hi"] (--text "Hello" | --html "<p>Hello</p>") [--staged-attachment-id sat_...] [--idempotency-key key]  (saves a new message to Drafts; never sends)
+  shipmail inbox get-compose-draft <mailbox-id> <draft-id>
+  shipmail inbox update-compose-draft <mailbox-id> <draft-id> [--to ...] [--cc ...] [--bcc ...] [--subject "Hi"] [--text "Hello" | --html "<p>Hello</p>"] [--keep-attachment id ...] [--staged-attachment-id sat_...] [--clear-attachments]  (corrects a saved draft; never sends)
+  shipmail inbox delete-compose-draft <mailbox-id> <draft-id>
   shipmail inbox drafts <mailbox-id> <thread-id>
   shipmail inbox get-draft <mailbox-id> <thread-id> <draft-id>
-  shipmail inbox update-draft <mailbox-id> <thread-id> <draft-id> (--text "Hello" | --html "<p>Hello</p>")  (the new body replaces the old one)
+  shipmail inbox update-draft <mailbox-id> <thread-id> <draft-id> [--text "Hello" | --html "<p>Hello</p>"] [--keep-attachment id ...] [--staged-attachment-id sat_...] [--clear-attachments]  (the new body replaces the old one)
   shipmail inbox delete-draft <mailbox-id> <thread-id> <draft-id>
   shipmail inbox send-draft <mailbox-id> <thread-id> <draft-id> [--expected-content-sha256 hash]
   shipmail inbox reply-message <mailbox-id> <message-id> --to user@example.com [--cc ...] [--bcc ...] (--text "Hello" | --html "<p>Hello</p>") [--track-reply true|false] [--add-signature]
@@ -921,12 +996,22 @@ Usage:
   shipmail event-queues delete <event-queue-id>
   shipmail event-queues events <event-queue-id> [--limit 50]  (oldest unacknowledged events first; reading changes nothing)
   shipmail event-queues ack <event-queue-id> <event-id> [<event-id> ...]  (removes handled events; repeat events while has_more)
+  shipmail transactional-domains list
+  shipmail transactional-domains create --root-domain example.com --subdomain mail  (returns the DNS records to publish; run it again to resume an unfinished setup)
+  shipmail transactional-domains get <transactional-domain-id>
+  shipmail transactional-domains verify <transactional-domain-id>  (repeat until status is verified)
+  shipmail transactional-domains delete <transactional-domain-id>
+  shipmail transactional-senders list [--domain-id txdom_...]
+  shipmail transactional-senders create --domain-id txdom_... --mailbox-id mbx --local-part hello --display-name "Acme"  (replies go to the mailbox)
+  shipmail transactional-senders get <transactional-sender-id>
+  shipmail transactional-senders update <transactional-sender-id> [--state active|disabled] [--mailbox-id mbx] [--refuse-disposable true|false]
   shipmail smtp-credentials list [--from notifications@notify.example.com]
   shipmail smtp-credentials create --from notifications@notify.example.com --name "Supabase Auth"  (prints the password once)
   shipmail smtp-credentials revoke <smtp-credential-id>
   shipmail suppressions add <email> [--scope all|marketing]
-  shipmail suppressions list [--scope all|marketing|transactional|mailbox] [--limit 25] [--cursor cur]
-  shipmail suppressions remove <email>
+  shipmail suppressions list [--scope all|marketing|transactional|mailbox] [--reason hard_bounce|complaint|manual|soft_bounce|unsubscribe] [--limit 25] [--cursor cur]  (lists newsletter opt-outs too, with source newsletter_optout)
+  shipmail suppressions remove <email>  (never removes a newsletter opt-out: use suppressions resubscribe)
+  shipmail suppressions resubscribe <email> --consent-source "Asked to rejoin by email"  (lifts a newsletter opt-out with fresh consent)
   shipmail customers list [--email jane@acme.com | --domain acme.com | --external-source hubspot --external-id 42 | --q text] [--tag vip] [--limit 25] [--cursor cur]
   shipmail customers get <customer-id>
   shipmail customers create [--name "Jane Doe"] [--company Acme] [--notes text] [--service-level-id svl_...] [--email jane@acme.com ...] [--domain acme.com ...] [--fields JSON|@file] [--tag vip ...]
@@ -951,9 +1036,11 @@ Usage:
     --name "July changelog" \\
     --subject "What shipped in July" \\
     --blocks @blocks.json | --markdown @issue.md \\
-    [--feed-entry-url https://example.com/post] [--styling-mode styled|plain] [--track-engagement true|false] [--add-utm-tags true|false] [--publish-target email_and_website|email|website]
-  shipmail newsletters update nws_789 --subject "Updated subject" [--blocks @blocks-v2.json | --markdown @issue.md] [--feed-entry-url https://example.com/post] [--styling-mode styled|plain] [--track-engagement true|false] [--add-utm-tags true|false] [--subject-b "Second subject" | --clear-subject-b] [--subject-test-percent 1..25] [--subject-test-hours 1..72]
-  shipmail newsletters preview <id>
+    [--feed-entry-url https://example.com/post] [--styling-mode styled|plain] [--track-engagement true|false] [--add-utm-tags true|false] [--publish-target email_and_website|email|website] [--view-in-browser true|false]
+  shipmail newsletters update nws_789 --subject "Updated subject" [--blocks @blocks-v2.json | --markdown @issue.md] [--feed-entry-url https://example.com/post] [--styling-mode styled|plain] [--track-engagement true|false] [--add-utm-tags true|false] [--view-in-browser true|false] [--subject-b "Second subject" | --clear-subject-b] [--subject-test-percent 1..25] [--subject-test-hours 1..72]
+  shipmail newsletters preview <id> [--subscriber-id audmem_123]  (the email as delivered, for a sample reader or one subscriber)
+  shipmail newsletters recipients list <id> [--status pending|retrying|sending|sent|delivered|bounced|complained|failed|skipped|unsubscribed] [--reason opted_out|suppressed|never_email|undeliverable_domain|dormant|last_chance_waiting|no_longer_eligible|cancelled|content_in_review|email_removed|skipped_other|bounced|complained|unsubscribed|send_failed] [--limit 25] [--cursor cur]
+  shipmail newsletters recipients by-email <id> <email>
   shipmail newsletters preflight <id>
   shipmail newsletters test-send <id> --recipient-email owner@example.com
   shipmail newsletters schedule <id> --scheduled-at 2026-08-01T09:00:00.000Z [--limit 500]
@@ -964,11 +1051,19 @@ Usage:
   shipmail newsletter-assets upload <file> [--filename name] [--content-type type] [--thumbnail poster.jpg]
   shipmail newsletter-assets register-url <url> [--filename name] [--thumbnail-url url]
   shipmail newsletter-sender-identities list [--limit 25] [--cursor cur]
+  shipmail newsletter-sender-identities get <id>
+  shipmail newsletter-sender-identities create --newsletter-domain-id nwsdom_123 --from-name "Acme" --business-name "Acme Ltd." [--postal-address "..."] [--footer-text "..."] [--make-default true]
+  shipmail newsletter-sender-identities update <id> [--from-name "..."] [--business-name "..."] [--postal-address "..."] [--footer-text "..."] [--newsletter-domain-id nwsdom_123] [--make-default true]
+  shipmail newsletter-sender-identities delete <id>
   shipmail newsletter-domains list [--limit 25] [--cursor cur]
+  shipmail newsletter-domains get <id>
+  shipmail newsletter-domains create --root-domain example.com --reply-to-address hello@example.com [--subdomain news] [--from-local-part updates] [--reply-to-name "Acme"]
+  shipmail newsletter-domains verify <id>
+  shipmail newsletter-domains delete <id>
   shipmail audiences list [--limit 25] [--cursor cur]
   shipmail audiences create <name> --consent-source "Signup form" [--description "..."]
   shipmail audiences get <id>
-  shipmail audiences update <id> [--name "..."] [--description "..."] [--cleanup true|false] [--cleanup-ignored-issues 2..100] [--cleanup-inactive-days 30..3650]
+  shipmail audiences update <id> [--name "..."] [--description "..."] [--view-in-browser-default true|false] [--cleanup true|false] [--cleanup-ignored-issues 2..100] [--cleanup-inactive-days 30..3650] [--confirmation-email-copy <JSON|@file|null>] [--last-chance-email-copy <JSON|@file|null>]
   shipmail audiences delete <id>
   shipmail audiences feed get <audience-id>
   shipmail audiences feed update <audience-id> [--enabled true|false] [--title "..."] [--subtitle "..."] [--site-url https://...] [--canonical-url https://...] [--author-name "..."] [--icon-url https://...] [--entry-limit 10..100] [--idempotency-key key]
@@ -998,17 +1093,38 @@ Usage:
   shipmail calendar events get <event-id> --mailbox hello@example.com
   shipmail calendar events update <event-id> --mailbox hello@example.com [--title "..."] [--start ...] [--invitation-language en|fr|es] [--operation-key key] [--expected-revision sha256] [--send-guest-updates true|false]
   shipmail calendar events delete <event-id> --mailbox hello@example.com
-  shipmail calendar availability --mailbox hello@example.com --from 2026-08-03T00:00:00Z --to 2026-08-04T00:00:00Z [--duration 30] [--days 1,2,3,4,5] [--window-start 540] [--window-end 1020]
+  shipmail calendar availability --mailbox hello@example.com --from 2026-08-03T00:00:00Z --to 2026-08-04T00:00:00Z [--duration 30] [--timezone Europe/Paris] [--days 1,2,3,4,5] [--window-start 540] [--window-end 1020]
   shipmail booking-pages list [--limit 25] [--cursor cur]
-  shipmail booking-pages create --name "Intro" --mailbox hello@example.com --slug intro --duration-minutes 30 --availability-days 1,2,3,4,5 --window-start-minutes 540 --window-end-minutes 1020 --timezone America/New_York [--conferencing-provider zoom|google_meet]
+  shipmail booking-pages create --name "Intro" --mailbox hello@example.com --slug intro --duration-minutes 30 --availability-days 1,2,3,4,5 --window-start-minutes 540 --window-end-minutes 1020 --timezone America/New_York [--lock-timezone true] [--conferencing-provider zoom|google_meet]
   shipmail booking-pages get <id>
-  shipmail booking-pages update <id> [--name "..."] [--conferencing-provider zoom|google_meet|none] [--active false]
+  shipmail booking-pages slots <id> [--from 2026-11-09T00:00:00Z] [--to 2026-11-16T00:00:00Z]
+  shipmail booking-pages update <id> [--name "..."] [--lock-timezone true|false] [--conferencing-provider zoom|google_meet|none] [--active false]
   shipmail booking-pages delete <id>
   shipmail booking-links list [--status open|booked|expired|revoked] [--limit 25] [--cursor cur]
   shipmail booking-links create --name "Call with Sam" --mailbox hello@example.com --duration-minutes 30 --timezone Europe/Lisbon --range 2026-11-02T09:00:00Z/2026-11-02T12:00:00Z [--range ...] [--source-page bkp_...] [--max-bookings 1|unlimited] [--expires-at 2026-11-10T00:00:00Z]
   shipmail booking-links get <id>
   shipmail booking-links update <id> [--name "..."] [--range start/end|none] [--max-bookings n|unlimited] [--expires-at iso|none] [--source-page id|none]
   shipmail booking-links revoke <id>
+
+Organization settings:
+  --default-timezone <zone|none>  IANA zone used when a request and your calendar name none.
+                                  none clears it, so Etc/UTC applies.
+  --models-enabled <true|false>   Turn AI features on or off for the organization.
+                                  automatic_send_enabled is read-only.
+  ai-settings prints each switch and, under effective, whether Shipmail has it in effect.
+  update needs the organization:write permission and an Owner or Admin behind the credential.
+
+Calendar time zones:
+  calendar availability without --timezone, and calendar events create without --timezone for a
+  timed event, use your calendar's time zone, then the organization's default, then Etc/UTC.
+
+Draft files:
+  --keep-attachment <id>         Keep a file the draft has now, by the id the draft returned.
+                                 Repeat it. Ids change after every update; read the draft again.
+  --staged-attachment-id <sat_>  On update-compose-draft and update-draft, add a staged upload.
+  --clear-attachments            Remove every file.
+  With any of these, the draft's files become the kept ones, then the staged ones; without them
+  the files stay. At most 20 files and 25 MB in total.
 
 Booking page conferencing:
   --conferencing-provider <zoom|google_meet>  Create a meeting for every booking.
@@ -1054,7 +1170,10 @@ Newsletter styling:
   --styling-mode <styled|plain>  styled applies Shipmail's email theme. plain sends your HTML without injected styles, width, or centering, so the reader's email client styles it.
 
 Newsletter publish target:
-  --publish-target <email_and_website|email|website>  Where the newsletter goes. email_and_website (default) sends it, and its archive visibility decides whether it also appears on the website and feed. email never appears on the web. website is published on the audience's newsletter website and feed at the scheduled time without any email; the website must be on.
+  --publish-target <email_and_website|email|website>  Where the newsletter goes. email_and_website (default) sends it, and lists it on the audience's newsletter website and feed with --archive-visibility public. email is never listed on the website or feed. website is published on the website and feed at the scheduled time without any email; the audience needs its website or its feed on.
+  --view-in-browser <true|false>  Add a View in browser link to the email, opening the issue's own page. Anyone with the link can open it. Defaults to true for a public email_and_website issue, false otherwise.
+  --view-in-browser-default <true|false>  On audiences update, whether issues created in the dashboard for this audience start with a View in browser link. On by default.
+  --archive-visibility <private|public>  public lists the issue on the website and feed. Default private.
 
 Newsletter tracking:
   --track-engagement <true|false>  Track opens and clicks for this newsletter. Off by default. Changes only while the newsletter is a draft or scheduled for later.
@@ -1071,6 +1190,11 @@ List cleanup:
   --cleanup <true|false>  A cold subscriber gets one last-chance email instead of a newsletter, and becomes dormant if they do not click keep within 14 days.
   --cleanup-ignored-issues <n>  Tracked newsletters ignored in a row before a subscriber is cold (2 to 100, default 6).
   --cleanup-inactive-days <n>  Days without a sign of life before a subscriber is cold (30 to 3650, default 180).
+
+Audience email wording:
+  --confirmation-email-copy <JSON|@file|null>  The double opt-in confirmation email's own subject and message per language, for example {"en":{"subject":"Confirm your subscription","message":"One click and you are in."}}. A language left out uses the built-in wording; null or {} clears it.
+  --last-chance-email-copy <JSON|@file|null>  The list-cleanup last-chance email's wording, in the same shape.
+  Subject: one line, at most 120 characters. Message: plain text, at most 600 characters. No links or domain names, email addresses, phone numbers or invisible characters. The button, links, expiry, unsubscribe link and sender details stay fixed. Adding or changing wording needs a paid plan and newsletter sending in good standing.
 
 Newsletter block prose:
   Paragraph, quote, callout, list-item, and column bodies accept bare text or sanitized inline HTML. Use <p> and <br> for line breaks.
@@ -1913,6 +2037,20 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
     );
     return;
   }
+  if (subcommand === "raw") {
+    const bytes = await client.mailboxes.downloadInboxMessageRaw(
+      requirePositional(parsed.positional, 2, "mailbox id"),
+      requirePositional(parsed.positional, 3, "message id"),
+    );
+    const outputPath = getString(parsed.options, "output");
+    if (outputPath) {
+      await writeFile(outputPath, bytes);
+      out.write(`${outputPath}\n`);
+    } else {
+      out.write(new TextDecoder().decode(bytes));
+    }
+    return;
+  }
   if (subcommand === "security-review") {
     writeJson(
       out,
@@ -2048,6 +2186,54 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
     );
     return;
   }
+  if (subcommand === "get-compose-draft") {
+    writeJson(
+      out,
+      await client.mailboxes.getInboxDraft(
+        requirePositional(parsed.positional, 2, "mailbox id"),
+        requirePositional(parsed.positional, 3, "draft id"),
+      ),
+    );
+    return;
+  }
+  if (subcommand === "delete-compose-draft") {
+    const draftId = requirePositional(parsed.positional, 3, "draft id");
+    await client.mailboxes.deleteInboxDraft(
+      requirePositional(parsed.positional, 2, "mailbox id"),
+      draftId,
+    );
+    writeJson(out, { ok: true, id: draftId });
+    return;
+  }
+  if (subcommand === "update-compose-draft") {
+    const to = messageRecipients(parsed.options, "to");
+    const cc = messageRecipients(parsed.options, "cc");
+    const bcc = messageRecipients(parsed.options, "bcc");
+    const subject = getString(parsed.options, "subject");
+    const text = await readTextInput(getString(parsed.options, "text"));
+    const html = await readTextInput(getString(parsed.options, "html"));
+    const params = {
+      ...(to.length > 0 ? { to } : {}),
+      ...(cc.length > 0 ? { cc } : {}),
+      ...(bcc.length > 0 ? { bcc } : {}),
+      ...(subject !== undefined ? { subject } : {}),
+      ...(text ? { text } : {}),
+      ...(html ? { html } : {}),
+      ...draftAttachmentsParam(parsed.options),
+    };
+    if (Object.keys(params).length === 0) {
+      throw new CliUsageError("Provide at least one field to change.");
+    }
+    writeJson(
+      out,
+      await client.mailboxes.updateInboxDraft(
+        requirePositional(parsed.positional, 2, "mailbox id"),
+        requirePositional(parsed.positional, 3, "draft id"),
+        params,
+      ),
+    );
+    return;
+  }
   if (subcommand === "drafts") {
     writeJson(
       out,
@@ -2072,7 +2258,10 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
   if (subcommand === "update-draft") {
     const text = await readTextInput(getString(parsed.options, "text"));
     const html = await readTextInput(getString(parsed.options, "html"));
-    if (!text && !html) throw new CliUsageError("Provide --text or --html.");
+    const attachments = draftAttachmentsParam(parsed.options);
+    if (!text && !html && !attachments.attachments) {
+      throw new CliUsageError("Provide --text, --html or a draft file option.");
+    }
     writeJson(
       out,
       await client.mailboxes.updateInboxReplyDraft(
@@ -2082,6 +2271,7 @@ async function runInbox(client: ShipmailClient, parsed: ParsedArgs, out: Output)
         {
           ...(text ? { text } : {}),
           ...(html ? { html } : {}),
+          ...attachments,
         },
       ),
     );
@@ -2590,6 +2780,98 @@ function inviteMemberParams(parsed: ParsedArgs): InviteMemberParams {
   };
 }
 
+async function runTransactionalDomains(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(out, await client.transactionalDomains.list());
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(
+      out,
+      await client.transactionalDomains.create({
+        root_domain: getRequiredString(parsed.options, "root-domain"),
+        subdomain: getRequiredString(parsed.options, "subdomain"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "get" || subcommand === "verify") {
+    const id = requirePositional(parsed.positional, 2, "transactional domain id");
+    const domain =
+      subcommand === "get"
+        ? await client.transactionalDomains.get(id)
+        : await client.transactionalDomains.verify(id);
+    writeJson(out, domain);
+    return;
+  }
+  if (subcommand === "delete") {
+    const id = requirePositional(parsed.positional, 2, "transactional domain id");
+    await client.transactionalDomains.delete(id);
+    writeJson(out, { ok: true, id });
+    return;
+  }
+  throw new CliUsageError("Unknown transactional-domains command.");
+}
+
+const TRANSACTIONAL_SENDER_STATES = ["active", "disabled"] as const;
+
+async function runTransactionalSenders(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "list") {
+    writeJson(
+      out,
+      await client.transactionalSenders.list({
+        domain_id: getString(parsed.options, "domain-id"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(
+      out,
+      await client.transactionalSenders.create({
+        domain_id: getRequiredString(parsed.options, "domain-id"),
+        mailbox_id: getRequiredString(parsed.options, "mailbox-id"),
+        local_part: getRequiredString(parsed.options, "local-part"),
+        display_name: getRequiredString(parsed.options, "display-name"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "get") {
+    const id = requirePositional(parsed.positional, 2, "transactional sender id");
+    writeJson(out, await client.transactionalSenders.get(id));
+    return;
+  }
+  if (subcommand === "update") {
+    const id = requirePositional(parsed.positional, 2, "transactional sender id");
+    const params = {
+      state: getEnum(parsed.options, "state", TRANSACTIONAL_SENDER_STATES),
+      mailbox_id: getString(parsed.options, "mailbox-id"),
+      refuse_disposable: getBoolean(parsed.options, "refuse-disposable"),
+    };
+    if (
+      params.state === undefined &&
+      params.mailbox_id === undefined &&
+      params.refuse_disposable === undefined
+    ) {
+      throw new CliUsageError("Provide --state, --mailbox-id or --refuse-disposable.");
+    }
+    writeJson(out, await client.transactionalSenders.update(id, params));
+    return;
+  }
+  throw new CliUsageError("Unknown transactional-senders command.");
+}
+
 async function runSmtpCredentials(
   client: ShipmailClient,
   parsed: ParsedArgs,
@@ -2621,6 +2903,13 @@ async function runSmtpCredentials(
 
 const SUPPRESSION_SCOPES = ["all", "marketing", "transactional", "mailbox"] as const;
 const CREATE_SUPPRESSION_SCOPES = ["all", "marketing"] as const;
+const SUPPRESSION_LIST_REASONS = [
+  "hard_bounce",
+  "complaint",
+  "manual",
+  "soft_bounce",
+  "unsubscribe",
+] as const;
 
 async function runSuppressions(
   client: ShipmailClient,
@@ -2646,14 +2935,26 @@ async function runSuppressions(
         cursor: getString(parsed.options, "cursor"),
         limit: getNumber(parsed.options, "limit"),
         scope: getEnum(parsed.options, "scope", SUPPRESSION_SCOPES),
+        reason: getEnum(parsed.options, "reason", SUPPRESSION_LIST_REASONS),
       }),
     );
     return;
   }
   if (subcommand === "remove") {
     const email = requirePositional(parsed.positional, 2, "email");
-    await client.suppressions.remove(email);
-    writeJson(out, { ok: true, email });
+    // A newsletter opt-out that remains is reported, since it still blocks newsletters.
+    const removal = await client.suppressions.remove(email);
+    writeJson(out, removal ?? { ok: true, email });
+    return;
+  }
+  if (subcommand === "resubscribe") {
+    const email = requirePositional(parsed.positional, 2, "email");
+    writeJson(
+      out,
+      await client.suppressions.resubscribe(email, {
+        consent_source: getRequiredString(parsed.options, "consent-source"),
+      }),
+    );
     return;
   }
   throw new CliUsageError("Unknown suppressions command.");
@@ -3332,17 +3633,26 @@ async function runAudiences(
     const id = requirePositional(parsed.positional, 2, "audience id");
     const name = getString(parsed.options, "name");
     const description = getString(parsed.options, "description");
+    const view_in_browser_default = getBoolean(parsed.options, "view-in-browser-default");
     const cleanup_enabled = getBoolean(parsed.options, "cleanup");
     const cleanup_ignored_issues = getNumber(parsed.options, "cleanup-ignored-issues");
     const cleanup_inactive_days = getNumber(parsed.options, "cleanup-inactive-days");
+    const confirmation_email_copy = await emailCopyOption(
+      parsed.options,
+      "confirmation-email-copy",
+    );
+    const last_chance_email_copy = await emailCopyOption(parsed.options, "last-chance-email-copy");
     writeJson(
       out,
       await client.audiences.update(id, {
         ...(name ? { name } : {}),
         ...(description ? { description } : {}),
+        ...(view_in_browser_default !== undefined ? { view_in_browser_default } : {}),
         ...(cleanup_enabled !== undefined ? { cleanup_enabled } : {}),
         ...(cleanup_ignored_issues !== undefined ? { cleanup_ignored_issues } : {}),
         ...(cleanup_inactive_days !== undefined ? { cleanup_inactive_days } : {}),
+        ...(confirmation_email_copy !== undefined ? { confirmation_email_copy } : {}),
+        ...(last_chance_email_copy !== undefined ? { last_chance_email_copy } : {}),
       }),
     );
     return;
@@ -3362,6 +3672,11 @@ async function runNewsletterDomains(
   out: Output,
 ): Promise<void> {
   const subcommand = parsed.positional[1];
+  if (subcommand === "get") {
+    const id = requirePositional(parsed.positional, 2, "newsletter domain id");
+    writeJson(out, await client.newsletters.domains.get(id));
+    return;
+  }
   if (subcommand === "list") {
     writeJson(
       out,
@@ -3370,6 +3685,30 @@ async function runNewsletterDomains(
         limit: getNumber(parsed.options, "limit"),
       }),
     );
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(
+      out,
+      await client.newsletters.domains.create({
+        root_domain: getRequiredString(parsed.options, "root-domain"),
+        reply_to_address: getRequiredString(parsed.options, "reply-to-address"),
+        subdomain: getString(parsed.options, "subdomain"),
+        from_local_part: getString(parsed.options, "from-local-part"),
+        reply_to_name: getString(parsed.options, "reply-to-name"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "verify") {
+    const id = requirePositional(parsed.positional, 2, "newsletter domain id");
+    writeJson(out, await client.newsletters.domains.verify(id));
+    return;
+  }
+  if (subcommand === "delete") {
+    const id = requirePositional(parsed.positional, 2, "newsletter domain id");
+    await client.newsletters.domains.delete(id);
+    writeJson(out, { ok: true, id });
     return;
   }
   throw new CliUsageError("Unknown newsletter-domains command.");
@@ -3381,6 +3720,11 @@ async function runNewsletterSenderIdentities(
   out: Output,
 ): Promise<void> {
   const subcommand = parsed.positional[1];
+  if (subcommand === "get") {
+    const id = requirePositional(parsed.positional, 2, "sender identity id");
+    writeJson(out, await client.newsletters.senderIdentities.get(id));
+    return;
+  }
   if (subcommand === "list") {
     writeJson(
       out,
@@ -3389,6 +3733,41 @@ async function runNewsletterSenderIdentities(
         limit: getNumber(parsed.options, "limit"),
       }),
     );
+    return;
+  }
+  if (subcommand === "create") {
+    writeJson(
+      out,
+      await client.newsletters.senderIdentities.create({
+        newsletter_domain_id: getRequiredString(parsed.options, "newsletter-domain-id"),
+        from_name: getRequiredString(parsed.options, "from-name"),
+        business_name: getRequiredString(parsed.options, "business-name"),
+        postal_address: getString(parsed.options, "postal-address"),
+        footer_text: getString(parsed.options, "footer-text"),
+        make_default: getBoolean(parsed.options, "make-default"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "update") {
+    const id = requirePositional(parsed.positional, 2, "sender identity id");
+    writeJson(
+      out,
+      await client.newsletters.senderIdentities.update(id, {
+        newsletter_domain_id: getString(parsed.options, "newsletter-domain-id"),
+        from_name: getString(parsed.options, "from-name"),
+        business_name: getString(parsed.options, "business-name"),
+        postal_address: getString(parsed.options, "postal-address"),
+        footer_text: getString(parsed.options, "footer-text"),
+        make_default: getBoolean(parsed.options, "make-default"),
+      }),
+    );
+    return;
+  }
+  if (subcommand === "delete") {
+    const id = requirePositional(parsed.positional, 2, "sender identity id");
+    await client.newsletters.senderIdentities.delete(id);
+    writeJson(out, { ok: true, id });
     return;
   }
   throw new CliUsageError("Unknown newsletter-sender-identities command.");
@@ -3413,10 +3792,20 @@ async function runNewsletters(
     return;
   }
   if (subcommand === "preview") {
+    const subscriberId = getString(parsed.options, "subscriber-id");
     writeJson(
       out,
-      await client.newsletters.preview(requirePositional(parsed.positional, 2, "newsletter id")),
+      await client.newsletters.preview(
+        requirePositional(parsed.positional, 2, "newsletter id"),
+        subscriberId !== undefined
+          ? { preview_as: { type: "subscriber", subscriber_id: subscriberId } }
+          : undefined,
+      ),
     );
+    return;
+  }
+  if (subcommand === "recipients") {
+    await runNewsletterRecipients(client, parsed, out);
     return;
   }
   if (subcommand === "preflight") {
@@ -3472,6 +3861,38 @@ async function runNewsletters(
     return;
   }
   throw new CliUsageError("Unknown newsletters command.");
+}
+
+async function runNewsletterRecipients(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const action = parsed.positional[2];
+  const newsletterId = requirePositional(parsed.positional, 3, "newsletter id");
+  if (action === "list") {
+    writeJson(
+      out,
+      await client.newsletters.recipients.list(newsletterId, {
+        cursor: getString(parsed.options, "cursor"),
+        limit: getNumber(parsed.options, "limit"),
+        status: getEnum(parsed.options, "status", NEWSLETTER_RECIPIENT_STATUSES),
+        reason: getEnum(parsed.options, "reason", NEWSLETTER_RECIPIENT_REASONS),
+      }),
+    );
+    return;
+  }
+  if (action === "by-email") {
+    writeJson(
+      out,
+      await client.newsletters.recipients.getByEmail(
+        newsletterId,
+        requirePositional(parsed.positional, 4, "email"),
+      ),
+    );
+    return;
+  }
+  throw new CliUsageError("Unknown newsletters recipients command.");
 }
 
 async function runNewsletterAssets(
@@ -3988,6 +4409,7 @@ async function runBookingPages(
       window_start_minutes: requireNumber(options, "window-start-minutes"),
       window_end_minutes: requireNumber(options, "window-end-minutes"),
       timezone: getRequiredString(options, "timezone"),
+      lock_timezone: getBoolean(options, "lock-timezone"),
       description: getString(options, "description"),
       buffer_minutes: getNumber(options, "buffer-minutes"),
       minimum_notice_minutes: getNumber(options, "minimum-notice-minutes"),
@@ -4005,6 +4427,17 @@ async function runBookingPages(
     );
     return;
   }
+  if (subcommand === "slots") {
+    const id = requirePositional(parsed.positional, 2, "booking page id");
+    writeJson(
+      out,
+      await client.bookingPages.slots(id, {
+        from: getString(options, "from"),
+        to: getString(options, "to"),
+      }),
+    );
+    return;
+  }
   if (subcommand === "update") {
     const id = requirePositional(parsed.positional, 2, "booking page id");
     const days = getIntList(options, "availability-days");
@@ -4017,6 +4450,7 @@ async function runBookingPages(
       window_start_minutes: getNumber(options, "window-start-minutes"),
       window_end_minutes: getNumber(options, "window-end-minutes"),
       timezone: getString(options, "timezone"),
+      lock_timezone: getBoolean(options, "lock-timezone"),
       description: getString(options, "description"),
       buffer_minutes: getNumber(options, "buffer-minutes"),
       minimum_notice_minutes: getNumber(options, "minimum-notice-minutes"),
@@ -4087,6 +4521,16 @@ async function runAutomations(
     writeJson(out, await client.automations.run(id, options));
     return;
   }
+  if (subcommand === "test") {
+    writeJson(
+      out,
+      await client.automations.test(id, {
+        mailbox_id: getRequiredString(parsed.options, "mailbox-id"),
+        message_id: getRequiredString(parsed.options, "message-id"),
+      }),
+    );
+    return;
+  }
   throw new CliUsageError("Unknown automations command.");
 }
 
@@ -4110,7 +4554,7 @@ function writeError(err: unknown, errOut: Output): void {
         ? ` message_id=${shipmailError.messageId}`
         : "";
     errOut.write(`Error: ${shipmailError.message}${status}${requestId}${messageId}\n`);
-    if (shipmailError instanceof ValidationError) {
+    if (shipmailError instanceof ValidationError || shipmailError instanceof ConflictError) {
       for (const detail of shipmailError.details ?? []) {
         const code = detail.code ? ` (${detail.code})` : "";
         errOut.write(`  ${detail.field}: ${detail.message}${code}\n`);
@@ -4195,12 +4639,8 @@ export async function runCli(
     }
 
     const client = await createClient(parsed, options);
-    if (command === "organization") {
-      if (parsed.positional[1] !== "access") {
-        throw new CliUsageError("Unknown organization command.");
-      }
-      writeJson(out, await client.organization.access());
-    } else if (command === "automations") await runAutomations(client, parsed, out);
+    if (command === "organization") await runOrganization(client, parsed, out);
+    else if (command === "automations") await runAutomations(client, parsed, out);
     else if (command === "domains") await runDomains(client, parsed, out);
     else if (command === "mailboxes") await runMailboxes(client, parsed, out);
     else if (command === "members") await runMembers(client, parsed, out);
@@ -4210,6 +4650,10 @@ export async function runCli(
     else if (command === "reply-scans") await runReplyScans(client, parsed, out);
     else if (command === "webhooks") await runWebhooks(client, parsed, out);
     else if (command === "event-queues") await runEventQueues(client, parsed, out);
+    else if (command === "transactional-domains")
+      await runTransactionalDomains(client, parsed, out);
+    else if (command === "transactional-senders")
+      await runTransactionalSenders(client, parsed, out);
     else if (command === "smtp-credentials") await runSmtpCredentials(client, parsed, out);
     else if (command === "suppressions") await runSuppressions(client, parsed, out);
     else if (command === "customers") await runCustomers(client, parsed, out);
@@ -4230,6 +4674,37 @@ export async function runCli(
     writeError(err, errOut);
     return 1;
   }
+}
+
+async function runOrganization(
+  client: ShipmailClient,
+  parsed: ParsedArgs,
+  out: Output,
+): Promise<void> {
+  const subcommand = parsed.positional[1];
+  if (subcommand === "access") return writeJson(out, await client.organization.access());
+  if (subcommand === "get") return writeJson(out, await client.organization.get());
+  if (subcommand === "update") {
+    const zone = getRequiredString(parsed.options, "default-timezone");
+    return writeJson(
+      out,
+      await client.organization.update({ default_timezone: zone === "none" ? null : zone }),
+    );
+  }
+  if (subcommand === "ai-settings") {
+    const action = parsed.positional[2] ?? "get";
+    if (action === "get") return writeJson(out, await client.organization.getAiSettings());
+    if (action === "update") {
+      const models = getBoolean(parsed.options, "models-enabled");
+      if (models === undefined) {
+        throw new CliUsageError(
+          "Pass --models-enabled true|false. automatic_send_enabled is read-only.",
+        );
+      }
+      return writeJson(out, await client.organization.updateAiSettings({ models_enabled: models }));
+    }
+  }
+  throw new CliUsageError("Unknown organization command.");
 }
 
 async function main(): Promise<void> {

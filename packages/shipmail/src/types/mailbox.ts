@@ -217,6 +217,10 @@ export type InboxMessage = {
   readonly size: number;
   readonly authentication_results: EmailAuthenticationResults | null;
   readonly security: InboxMessageSecurity;
+  /** What kind of mail it is, from its headers, sender and subject. A hint for routing, not a security decision. `null` while the message is held. */
+  readonly category: InboxMessageCategory | null;
+  /** The day an out-of-office sender says they are back, as `YYYY-MM-DD`. `null` otherwise. */
+  readonly out_of_office_until: string | null;
 };
 
 export type InboxMessageSecurityReview = {
@@ -225,6 +229,14 @@ export type InboxMessageSecurityReview = {
   readonly message_id: string;
   readonly security: InboxMessageSecurity;
 };
+
+export type InboxMessageCategory =
+  | "human"
+  | "out_of_office"
+  | "auto_reply"
+  | "bounce"
+  | "bulk"
+  | "notification";
 
 export type InboxFullMessage = Omit<InboxMessage, "object"> & {
   readonly object: "inbox_message_full";
@@ -239,6 +251,23 @@ export type InboxFullMessage = Omit<InboxMessage, "object"> & {
   readonly attachments: readonly InboxAttachment[];
   /** What the sender newly wrote, without quoted history or signature. `null` when nothing is left. */
   readonly reply_text: string | null;
+};
+
+/** What a bounce or other delivery report (RFC 3464) says, for the first failed recipient or else the first. */
+export type DeliveryStatus = {
+  /** Enhanced status code, such as `5.1.1`. */
+  readonly status: string | null;
+  /** `failed`, `delayed`, `delivered`, `relayed` or `expanded`. */
+  readonly action: string | null;
+  readonly diagnostic_code: string | null;
+  readonly final_recipient: string | null;
+  readonly reporting_mta: string | null;
+};
+
+/** One message read by id. Lists and threads do not carry `delivery_status`. */
+export type InboxMessageDetail = InboxFullMessage & {
+  /** Parsed from a delivery report's message/delivery-status part. Null for other messages and for held ones. */
+  readonly delivery_status: DeliveryStatus | null;
 };
 
 export type InboxMessages = {
@@ -364,6 +393,8 @@ export type InboxReplyDraftList = {
 };
 
 export type InboxDraftAttachment = {
+  /** Names the file in the stored draft as it is now. It changes after every update; read the draft again for current ids. */
+  readonly id: string;
   readonly name: string | null;
   readonly type: string;
   readonly size: number;
@@ -373,18 +404,22 @@ export type InboxDraftRecipient = { readonly address: string; readonly name: str
 
 export type InboxDraft = {
   readonly object: "inbox_draft";
-  /** Inbox message ID of the saved draft. Read it with `getInboxMessage`. */
+  /** The draft's id. It stays the same when `updateInboxDraft` corrects the draft. */
   readonly id: string;
+  /** Inbox message that holds the draft now. Read it with `getInboxMessage`. It changes with every correction. */
+  readonly message_id: string;
   readonly mailbox_id: string;
   readonly from: InboxDraftRecipient;
   readonly to: readonly InboxDraftRecipient[];
   readonly cc: readonly InboxDraftRecipient[];
   readonly bcc: readonly InboxDraftRecipient[];
   readonly subject: string;
+  readonly html: string | null;
+  readonly text: string | null;
   /** Formatting the HTML sanitiser dropped, such as `table` or `h4`. */
   readonly removed_formatting: readonly string[];
   readonly created_at: string;
-  /** Link for a person to review this one draft and send it, or null for a test-mode key. The person must be signed in with access to the mailbox. Opening it sends nothing, and it stops working once the draft is sent, deleted or replaced. */
+  /** Link for a person to review this one draft and send it, or null for a test-mode key. The person must be signed in with access to the mailbox. Opening it sends nothing, and it stops working once the draft is sent or deleted, or a person replaces it in the inbox. A correction through the API keeps it working. */
   readonly review_url: string | null;
   readonly attachments: readonly InboxDraftAttachment[];
 };
@@ -587,6 +622,26 @@ export type CreateInboxDraftParams = {
   readonly staged_attachment_ids?: readonly string[] | undefined;
 };
 
+/**
+ * A file a draft should carry after an update: one it has now, by its current `id`, or a staged
+ * upload.
+ */
+export type DraftAttachmentSelection =
+  | { readonly id: string }
+  | { readonly staged_attachment_id: string };
+
+/** Name only what changes. text or html replaces the whole body, and files stay unless attachments is given. */
+export type UpdateInboxDraftParams = {
+  readonly to?: readonly EmailRecipientInput[] | undefined;
+  readonly cc?: readonly EmailRecipientInput[] | undefined;
+  readonly bcc?: readonly EmailRecipientInput[] | undefined;
+  readonly subject?: string | undefined;
+  readonly text?: string | undefined;
+  readonly html?: string | undefined;
+  /** Replaces the draft's files, in this order, at most 20 and 25 MB in total. `[]` removes them all. */
+  readonly attachments?: readonly DraftAttachmentSelection[] | undefined;
+};
+
 export type CreateInboxReplyDraftParams = {
   readonly text?: string | undefined;
   readonly html?: string | undefined;
@@ -596,10 +651,15 @@ export type CreateInboxReplyDraftParams = {
   readonly staged_attachment_ids?: readonly string[] | undefined;
 };
 
-/** The new body replaces the old one. HTML alone derives the text part; text alone makes a plain-text draft. */
+/**
+ * The new body replaces the old one. HTML alone derives the text part; text alone makes a
+ * plain-text draft. Send html, text or attachments; without html and text the body stays.
+ */
 export type UpdateInboxReplyDraftParams = {
   readonly text?: string | undefined;
   readonly html?: string | undefined;
+  /** Replaces the draft's files, in this order, at most 20 and 25 MB in total. `[]` removes them all. */
+  readonly attachments?: readonly DraftAttachmentSelection[] | undefined;
 };
 
 export type UpdateInboxThreadAttentionParams = {

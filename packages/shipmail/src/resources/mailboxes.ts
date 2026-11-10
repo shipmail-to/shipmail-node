@@ -51,6 +51,7 @@ import type {
   ReleaseInboxMessageSecurityParams,
   ResetMailboxPasswordParams,
   UpdateAutoReplyParams,
+  UpdateInboxDraftParams,
   UpdateInboxMessageParams,
   UpdateInboxReplyDraftParams,
   UpdateInboxThreadAttentionParams,
@@ -276,9 +277,25 @@ export class Mailboxes extends ApiResource {
   }
 
   getInboxMessage(id: string, messageId: string, options?: MethodOptions) {
-    return this.client.request<import("../types/mailbox.js").InboxFullMessage>({
+    return this.client.request<import("../types/mailbox.js").InboxMessageDetail>({
       method: "GET",
       path: `/mailboxes/${encodeURIComponent(id)}/inbox/messages/${encodeURIComponent(messageId)}`,
+      methodOptions: options,
+    });
+  }
+
+  /**
+   * The stored message as message/rfc822 bytes (an .eml file), inbound or sent. A message held
+   * for security review needs `messages:review`. Refused over 25 MB.
+   */
+  downloadInboxMessageRaw(
+    id: string,
+    messageId: string,
+    options?: MethodOptions,
+  ): Promise<Uint8Array> {
+    return this.client.requestBytes({
+      method: "GET",
+      path: `/mailboxes/${encodeURIComponent(id)}/inbox/messages/${encodeURIComponent(messageId)}/raw`,
       methodOptions: options,
     });
   }
@@ -354,6 +371,42 @@ export class Mailboxes extends ApiResource {
     });
   }
 
+  /** Reads a draft from createInboxDraft. Not found once a person sent or deleted it in their own client. */
+  getInboxDraft(id: string, draftId: string, options?: MethodOptions): Promise<InboxDraft> {
+    return this.client.request<InboxDraft>({
+      method: "GET",
+      path: `/mailboxes/${encodeURIComponent(id)}/inbox/drafts/${encodeURIComponent(draftId)}`,
+      methodOptions: options,
+    });
+  }
+
+  /**
+   * Deletes a draft from createInboxDraft. Refused with a conflict while a send holds it, it waits
+   * in a scheduled send, or a person took it over in the inbox composer.
+   */
+  deleteInboxDraft(id: string, draftId: string, options?: MethodOptions): Promise<void> {
+    return this.client.request<void>({
+      method: "DELETE",
+      path: `/mailboxes/${encodeURIComponent(id)}/inbox/drafts/${encodeURIComponent(draftId)}`,
+      methodOptions: options,
+    });
+  }
+
+  /** Corrects a draft from createInboxDraft. Its id and review_url stay the same. It sends nothing. */
+  updateInboxDraft(
+    id: string,
+    draftId: string,
+    params: UpdateInboxDraftParams,
+    options?: MethodOptions,
+  ): Promise<InboxDraft> {
+    return this.client.request<InboxDraft>({
+      method: "PATCH",
+      path: `/mailboxes/${encodeURIComponent(id)}/inbox/drafts/${encodeURIComponent(draftId)}`,
+      body: params,
+      methodOptions: options,
+    });
+  }
+
   createInboxReplyDraft(
     id: string,
     threadId: string,
@@ -394,7 +447,7 @@ export class Mailboxes extends ApiResource {
     });
   }
 
-  /** Replaces the draft body. Recipients, subject and reply headers stay derived from the source message. */
+  /** Replaces the draft body or files. Recipients, subject and reply headers stay derived from the source message. */
   updateInboxReplyDraft(
     id: string,
     threadId: string,

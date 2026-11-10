@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { ShipmailClient } from "../../client.js";
-import type { Automation, AutomationDefinition } from "../../types/automation.js";
+import type { Automation, AutomationDefinition, AutomationTest } from "../../types/automation.js";
 
 function createClient(
   handler: (input: string | URL | Request, init?: RequestInit) => Response | Promise<Response>,
@@ -31,6 +31,9 @@ const automation: Automation = {
   definition,
   last_run: null,
   next_run_at: "2026-08-03T08:00:00.000Z",
+  runnable: false,
+  blocked_reasons: ["models_disabled"],
+  send_degraded_reasons: [],
   created_at: "2026-08-02T00:00:00.000Z",
   updated_at: "2026-08-02T00:00:00.000Z",
 };
@@ -77,5 +80,40 @@ describe("Automations", () => {
       `PATCH /v1/automations/${automation.id}`,
       `POST /v1/automations/${automation.id}/run`,
     ]);
+  });
+
+  test("tests an automation on one message", async () => {
+    const result: AutomationTest = {
+      object: "automation_test",
+      automation_id: automation.id,
+      mailbox_id: "mbx_1",
+      message_id: "eml_1",
+      runnable: true,
+      blocked_reasons: [],
+      send_degraded_reasons: [],
+      conditions: [
+        {
+          index: 0,
+          type: "sender_domain",
+          matched: true,
+          confidence: null,
+          not_evaluated_reason: null,
+        },
+      ],
+      conditions_matched: true,
+      would_run: true,
+      mode: "draft",
+      actions: [{ index: 0, type: "create_reply_draft" }],
+      model_calls: 0,
+    };
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("POST");
+      expect(new URL(String(input)).pathname).toBe(`/v1/automations/${automation.id}/test`);
+      expect(JSON.parse(String(init?.body))).toEqual({ mailbox_id: "mbx_1", message_id: "eml_1" });
+      return Response.json(result);
+    });
+    expect(
+      await client.automations.test(automation.id, { mailbox_id: "mbx_1", message_id: "eml_1" }),
+    ).toEqual(result);
   });
 });

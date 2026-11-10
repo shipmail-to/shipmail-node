@@ -45,9 +45,20 @@ export type CalendarAttendee = CalendarPerson & {
   readonly status: "needs-action" | "accepted" | "declined" | "tentative";
 };
 
+export type CalendarInvitationSkipReason = "send_invitations_false" | "send_guest_updates_false";
+
+/**
+ * `unknown` means the submission may have reached the mail server; retry the same operation key.
+ */
 export type CalendarInvitationOutcome = {
   readonly recipient: string;
   readonly status: "sent" | "failed" | "unknown";
+};
+
+/** An attendee who was not emailed because the request turned invitations or updates off. */
+export type CalendarInvitationSkip = {
+  readonly recipient: string;
+  readonly reason: CalendarInvitationSkipReason;
 };
 
 export type CalendarEvent = {
@@ -83,7 +94,9 @@ export type CalendarEvent = {
 
 export type CalendarEventMutationResult = CalendarEvent & {
   readonly invitation_outcomes: readonly CalendarInvitationOutcome[];
-  /** Compatibility list containing failed and unknown recipients. */
+  /** Attendees who were not emailed because the request turned sending off. Never retried. */
+  readonly invitation_skipped: readonly CalendarInvitationSkip[];
+  /** Compatibility list containing failed and unknown recipients. Skipped ones are not listed. */
   readonly invitation_failures: readonly string[];
 };
 
@@ -114,6 +127,10 @@ export type CreateCalendarEventParams = {
   readonly invitation_language?: CalendarInvitationLanguage | undefined;
   readonly start: string;
   readonly description?: string | undefined;
+  /**
+   * IANA zone for `start`. A timed event without one uses the calendar time zone of the person
+   * behind the credential, then the organization's `default_timezone`, then Etc/UTC.
+   */
   readonly timezone?: string | undefined;
   readonly duration?: string | undefined;
   readonly all_day?: boolean | undefined;
@@ -165,6 +182,7 @@ export type CalendarAvailability = {
   readonly from: string;
   readonly to: string;
   readonly duration_minutes: number;
+  /** The zone used, whether requested or resolved from the defaults. */
   readonly timezone: string;
   readonly slots: readonly CalendarAvailabilitySlot[];
 };
@@ -175,6 +193,10 @@ export type CalendarAvailabilityParams = {
   readonly to: string;
   readonly duration?: number | undefined;
   readonly interval?: number | undefined;
+  /**
+   * IANA zone for the working window. Defaults to the calendar time zone of the person behind the
+   * credential, then the organization's `default_timezone`, then Etc/UTC.
+   */
   readonly timezone?: string | undefined;
   readonly days?: readonly number[] | undefined;
   readonly window_start?: number | undefined;

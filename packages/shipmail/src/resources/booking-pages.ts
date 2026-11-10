@@ -2,7 +2,9 @@ import { Page } from "../pagination.js";
 import { ApiResource } from "../resource.js";
 import type {
   BookingPage,
+  BookingPageSlots,
   CreateBookingPageParams,
+  GetBookingPageSlotsParams,
   ListBookingPagesParams,
   UpdateBookingPageParams,
 } from "../types/booking-page.js";
@@ -38,6 +40,20 @@ export class BookingPages extends ApiResource {
     return this.client.request<BookingPage>({
       method: "GET",
       path: `/booking-pages/${encodeURIComponent(id)}`,
+      methodOptions: options,
+    });
+  }
+
+  // The open slots the page's public booking page offers, as UTC instants.
+  slots(
+    id: string,
+    params?: GetBookingPageSlotsParams,
+    options?: MethodOptions,
+  ): Promise<BookingPageSlots> {
+    return this.client.request<BookingPageSlots>({
+      method: "GET",
+      path: `/booking-pages/${encodeURIComponent(id)}/slots`,
+      query: { from: params?.from, to: params?.to },
       methodOptions: options,
     });
   }

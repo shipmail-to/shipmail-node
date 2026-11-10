@@ -35,18 +35,19 @@ export type ErrorType =
   | "reconciliation_required"
   | "internal_error";
 
+/** One field-level problem in an error. `code` is a stable machine-readable value. */
+export type ErrorDetail = {
+  readonly field: string;
+  readonly message: string;
+  readonly code?: string | undefined;
+};
+
 export type ApiErrorBody = {
   readonly error: {
     readonly type: ErrorType;
     readonly message: string;
     readonly request_id?: string | undefined;
-    readonly details?:
-      | readonly {
-          readonly field: string;
-          readonly message: string;
-          readonly code?: string | undefined;
-        }[]
-      | undefined;
+    readonly details?: readonly ErrorDetail[] | undefined;
     readonly retry_after?: number | undefined;
     /**
      * Present only on a `reconciliation_required` error: the tracking message
@@ -117,6 +118,9 @@ export const WEBHOOK_EVENT_TYPES = [
   "booking.created",
   "subscriber.added",
   "newsletter.sent",
+  "newsletter.recipient.bounced",
+  "newsletter.recipient.complained",
+  "newsletter.recipient.unsubscribed",
   "draft.reviewed",
 ] as const;
 

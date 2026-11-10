@@ -25,9 +25,12 @@ const mockAudience: Audience = {
   consent_source: "Signup form",
   feed_enabled: false,
   feed_url: null,
+  view_in_browser_default: true,
   cleanup_enabled: true,
   cleanup_ignored_issues: 6,
   cleanup_inactive_days: 180,
+  confirmation_email_copy: null,
+  last_chance_email_copy: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -39,6 +42,8 @@ const mockSubscriber: Subscriber = {
   email_address: "a@shipmail.to",
   display_name: null,
   status: "subscribed",
+  mailable: true,
+  not_mailable_reasons: [],
   merge_fields: {},
   consent_source: "Signup form",
   created_at: "2026-01-01T00:00:00Z",
@@ -106,6 +111,36 @@ describe("Audiences", () => {
     expect(audience.name).toBe("Renamed");
   });
 
+  test("update sends view_in_browser_default", async () => {
+    const client = createClient((_input, init) => {
+      expect(JSON.parse(init?.body as string)).toEqual({ view_in_browser_default: false });
+      return Response.json({ ...mockAudience, view_in_browser_default: false });
+    });
+
+    const audience = await client.audiences.update("aud_123", { view_in_browser_default: false });
+    expect(audience.view_in_browser_default).toBe(false);
+  });
+
+  test("update sends email wording and an explicit null that clears it", async () => {
+    const confirmation = {
+      fr: { subject: "Confirmez votre inscription", message: "Un clic et c'est fait." },
+    };
+    const client = createClient((_input, init) => {
+      expect(JSON.parse(init?.body as string)).toEqual({
+        confirmation_email_copy: confirmation,
+        last_chance_email_copy: null,
+      });
+      return Response.json({ ...mockAudience, confirmation_email_copy: confirmation });
+    });
+
+    const audience = await client.audiences.update("aud_123", {
+      confirmation_email_copy: confirmation,
+      last_chance_email_copy: null,
+    });
+    expect(audience.confirmation_email_copy?.fr?.subject).toBe("Confirmez votre inscription");
+    expect(audience.last_chance_email_copy).toBeNull();
+  });
+
   test("delete sends DELETE /audiences/:id and returns void", async () => {
     const client = createClient((input, init) => {
       expect(init?.method).toBe("DELETE");
@@ -163,6 +198,54 @@ describe("Audiences.subscribers", () => {
       email_address: "a@shipmail.to",
     });
     expect(result.outcome).toBe("created");
+  });
+
+  test("add returns the reason an address was skipped", async () => {
+    const client = createClient(() =>
+      Response.json({
+        email_address: "a@shipmail.to",
+        outcome: "skipped_not_mailable",
+        reason: "unsubscribed",
+      }),
+    );
+
+    const result = await client.audiences.subscribers.add("aud_123", {
+      email_address: "a@shipmail.to",
+    });
+    expect(result.outcome).toBe("skipped_not_mailable");
+    if (result.outcome === "skipped_not_mailable") {
+      expect(result.reason).toBe("unsubscribed");
+    }
+  });
+
+  test("get returns why a subscriber cannot receive newsletters", async () => {
+    const response: Subscriber = {
+      ...mockSubscriber,
+      mailable: false,
+      not_mailable_reasons: [
+        {
+          reason: "unsubscribed",
+          source: "newsletter_optout",
+          created_at: "2026-01-02T00:00:00Z",
+          newsletter_id: "nws_123",
+          test_send: true,
+        },
+        {
+          reason: "hard_bounce",
+          source: "suppression",
+          created_at: "2026-01-03T00:00:00Z",
+          expires_at: null,
+        },
+      ],
+    };
+    const client = createClient(() => Response.json(response));
+
+    const result = await client.audiences.subscribers.get("aud_123", "audmem_1");
+    expect(result.mailable).toBe(false);
+    expect(result.not_mailable_reasons.map((r) => r.source)).toEqual([
+      "newsletter_optout",
+      "suppression",
+    ]);
   });
 
   test("addBatch sends POST /audiences/:id/subscribers/batch with results", async () => {

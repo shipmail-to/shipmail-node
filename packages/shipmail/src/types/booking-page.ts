@@ -16,6 +16,7 @@ export type BookingPage = {
   readonly window_start_minutes: number;
   readonly window_end_minutes: number;
   readonly timezone: string;
+  readonly lock_timezone: boolean;
   readonly buffer_minutes: number;
   readonly minimum_notice_minutes: number;
   readonly max_advance_days: number;
@@ -36,6 +37,7 @@ export type CreateBookingPageParams = {
   readonly window_start_minutes: number;
   readonly window_end_minutes: number;
   readonly timezone: string;
+  readonly lock_timezone?: boolean | undefined;
   readonly description?: string | null | undefined;
   readonly buffer_minutes?: number | undefined;
   readonly minimum_notice_minutes?: number | undefined;
@@ -53,10 +55,31 @@ export type UpdateBookingPageParams = {
   readonly window_start_minutes?: number | undefined;
   readonly window_end_minutes?: number | undefined;
   readonly timezone?: string | undefined;
+  readonly lock_timezone?: boolean | undefined;
   readonly description?: string | null | undefined;
   readonly buffer_minutes?: number | undefined;
   readonly minimum_notice_minutes?: number | undefined;
   readonly max_advance_days?: number | undefined;
   readonly conferencing_provider?: ConferencingProviderId | null | undefined;
   readonly active?: boolean | undefined;
+};
+
+export type BookingPageSlot = {
+  readonly start: string;
+  readonly end: string;
+};
+
+export type BookingPageSlots = {
+  readonly object: "booking_page_slots";
+  readonly booking_page_id: string;
+  readonly timezone: string;
+  readonly duration_minutes: number;
+  readonly from: string;
+  readonly to: string;
+  readonly slots: readonly BookingPageSlot[];
+};
+
+export type GetBookingPageSlotsParams = {
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
 };

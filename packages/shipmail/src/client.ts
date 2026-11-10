@@ -20,6 +20,8 @@ import { Status } from "./resources/status.js";
 import { Suppressions } from "./resources/suppressions.js";
 import { Templates } from "./resources/templates.js";
 import { Threads } from "./resources/threads.js";
+import { TransactionalDomains } from "./resources/transactional-domains.js";
+import { TransactionalSenders } from "./resources/transactional-senders.js";
 import { Webhooks } from "./resources/webhooks.js";
 import type { ApiErrorBody, MethodOptions, ShipmailConfig } from "./types/common.js";
 import { VERSION } from "./version.js";
@@ -107,6 +109,8 @@ export class ShipmailClient {
   readonly suppressions: Suppressions;
   readonly templates: Templates;
   readonly threads: Threads;
+  readonly transactionalDomains: TransactionalDomains;
+  readonly transactionalSenders: TransactionalSenders;
   readonly webhooks: Webhooks;
   readonly status: Status;
 
@@ -155,6 +159,8 @@ export class ShipmailClient {
     this.suppressions = new Suppressions(this);
     this.templates = new Templates(this);
     this.threads = new Threads(this);
+    this.transactionalDomains = new TransactionalDomains(this);
+    this.transactionalSenders = new TransactionalSenders(this);
     this.webhooks = new Webhooks(this);
     this.status = new Status(this);
   }

@@ -19,6 +19,7 @@ Official TypeScript SDK for the [Shipmail](https://shipmail.to) API. Zero runtim
 - [Mailboxes](#mailboxes)
 - [Messages](#messages)
 - [Templates](#templates)
+- [Transactional domains and senders](#transactional-domains-and-senders)
 - [SMTP credentials](#smtp-credentials)
 - [Scheduled messages and attachments](#scheduled-messages-and-attachments)
 - [Sandbox](#sandbox)
@@ -257,6 +258,9 @@ const newDraft = await shipmail.mailboxes.createInboxDraft(mailboxId, {
   subject: "Quick intro",
   text: "Hi Jane,",
 });
+
+// Correct it. Its id and review_url stay the same, and this never sends.
+await shipmail.mailboxes.updateInboxDraft(mailboxId, newDraft.id, { text: "Hi Jane, thanks." });
 ```
 
 ## Messages
@@ -323,6 +327,37 @@ A send naming an unknown template fails with `NotFoundError`. A template that wa
 a required variable left out, or a variable the template does not use fails with
 `ValidationError`, whose `details[].code` is `template_not_published`, `missing_variable` or
 `unknown_variable`.
+
+## Transactional domains and senders
+
+A transactional domain is a sending subdomain of one of your verified domains, such as
+`mail.example.com`. A transactional sender is an address on it, such as `hello@mail.example.com`,
+whose replies go to a mailbox you choose.
+
+```ts
+const domain = await shipmail.transactionalDomains.create({
+  root_domain: "example.com",
+  subdomain: "mail",
+});
+// Publish each domain.dns_records entry at your DNS host, then check until it is verified.
+const checked = await shipmail.transactionalDomains.verify(domain.id);
+
+if (checked.status === "verified") {
+  const sender = await shipmail.transactionalSenders.create({
+    domain_id: domain.id,
+    mailbox_id: "550e8400-e29b-41d4-a716-446655440000",
+    local_part: "hello",
+    display_name: "Acme",
+  });
+  await shipmail.transactionalSenders.list({ domain_id: domain.id });
+  await shipmail.transactionalSenders.update(sender.id, { state: "disabled" });
+}
+```
+
+`dns_records` is empty until setup finishes; call `create` again with the same values to resume it.
+Senders have no delete: turn one off with `state: "disabled"`. `transactionalDomains.delete` is
+refused while senders use the domain. Then send from the sender's address with `messages.send`, or
+create an SMTP credential for it.
 
 ## SMTP credentials
 
@@ -543,6 +578,9 @@ calendar.rsvp_updated
 booking.created
 subscriber.added
 newsletter.sent
+newsletter.recipient.bounced
+newsletter.recipient.complained
+newsletter.recipient.unsubscribed
 draft.reviewed
 ```
 
@@ -553,8 +591,19 @@ await shipmail.suppressions.create({ email: "user@example.com" }); // scope defa
 await shipmail.suppressions.create({ email: "user@example.com", scope: "marketing" });
 await shipmail.suppressions.list({ limit: 25 });
 await shipmail.suppressions.list({ scope: "marketing" }); // newsletter complaints only
+await shipmail.suppressions.list({ reason: "unsubscribe" }); // newsletter opt-outs only
 await shipmail.suppressions.remove("user@example.com");
+// Lift a newsletter opt-out once the reader opted in again, even with no audience membership.
+await shipmail.suppressions.resubscribe("reader@example.com", {
+  consent_source: "Replied to ask to rejoin",
+});
 ```
+
+The list holds newsletter opt-outs too, with `source: "newsletter_optout"`, `reason: "unsubscribe"`,
+`newsletter_id` and `test_send`. `remove` deletes only a bounce, complaint or manual suppression,
+never an opt-out. It resolves to `undefined`, or to a `suppression_removal` object when an opt-out
+still blocks newsletters. When the address has only an opt-out it throws `ConflictError` whose
+`details[0].code` is `consent_opt_out`: lift it with `resubscribe` instead.
 
 Auto-paginate:
 
@@ -637,7 +686,12 @@ const newsletter = await shipmail.newsletters.create({
   ],
 });
 
+// The email exactly as delivered: subject, headers, footer and unsubscribe link included.
 await shipmail.newsletters.preview(newsletter.id);
+// As one reader would get it (also needs the audiences:read scope).
+await shipmail.newsletters.preview(newsletter.id, {
+  preview_as: { type: "subscriber", subscriber_id: "audmem_..." },
+});
 
 await shipmail.newsletters.sendTest(newsletter.id, {
   recipient_email: "owner@example.com",
@@ -649,6 +703,16 @@ await shipmail.newsletters.schedule(newsletter.id, {
   scheduled_at: "2026-08-01T09:00:00.000Z",
 });
 ```
+
+After a send, each reader's result is listed, with a stable `reason` for every skip:
+
+```ts
+await shipmail.newsletters.recipients.list(newsletter.id, { status: "skipped" });
+await shipmail.newsletters.recipients.getByEmail(newsletter.id, "reader@example.com");
+```
+
+Subscribers carry `mailable` and `not_mailable_reasons`, which say whether the organization may
+send newsletters to the address now, and why not.
 
 Newsletter test sends and schedules must pass preflight. Guardrail failures throw
 `ValidationError` with the failed preflight items in `error.details`.

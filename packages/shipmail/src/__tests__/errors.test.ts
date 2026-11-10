@@ -137,6 +137,23 @@ describe("mapErrorFromResponse", () => {
     expect(err.retryable).toBe(false);
   });
 
+  test("keeps the details of a conflict", () => {
+    const body: ApiErrorBody = {
+      error: {
+        type: "conflict",
+        message: "Opted out",
+        details: [{ field: "email", code: "consent_opt_out", message: "Resubscribe instead." }],
+      },
+    };
+    const err = mapErrorFromResponse(409, body);
+    expect(err).toBeInstanceOf(ConflictError);
+    if (err instanceof ConflictError) {
+      expect(err.details).toEqual([
+        { field: "email", code: "consent_opt_out", message: "Resubscribe instead." },
+      ]);
+    }
+  });
+
   test("maps internal_error to InternalServerError", () => {
     const body: ApiErrorBody = {
       error: { type: "internal_error", message: "Something went wrong", request_id: "req_7" },

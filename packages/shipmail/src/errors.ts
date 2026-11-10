@@ -1,4 +1,4 @@
-import type { ApiErrorBody, ErrorLimit, ErrorType } from "./types/common.js";
+import type { ApiErrorBody, ErrorDetail, ErrorLimit, ErrorType } from "./types/common.js";
 
 /** The `reason` values this SDK knows. A newer server may send others; they pass through. */
 export const ERROR_RECOVERY_REASONS = [
@@ -74,25 +74,13 @@ export class AuthorizationError extends ShipmailError {
 }
 
 export class ValidationError extends ShipmailError {
-  readonly details:
-    | readonly {
-        readonly field: string;
-        readonly message: string;
-        readonly code?: string | undefined;
-      }[]
-    | undefined;
+  readonly details: readonly ErrorDetail[] | undefined;
 
   constructor(
     message: string,
     options?: {
       readonly requestId?: string | undefined;
-      readonly details?:
-        | readonly {
-            readonly field: string;
-            readonly message: string;
-            readonly code?: string | undefined;
-          }[]
-        | undefined;
+      readonly details?: readonly ErrorDetail[] | undefined;
       readonly reason?: string | undefined;
       readonly actionUrl?: string | undefined;
     },
@@ -150,9 +138,16 @@ export class RateLimitError extends ShipmailError {
 }
 
 export class ConflictError extends ShipmailError {
-  constructor(message: string, requestId?: string) {
+  /**
+   * Why the request conflicts, when the server says. For example, removing a suppression for an
+   * address that only has a newsletter opt-out fails with `code: "consent_opt_out"`.
+   */
+  readonly details: readonly ErrorDetail[] | undefined;
+
+  constructor(message: string, requestId?: string, details?: readonly ErrorDetail[]) {
     super(message, { status: 409, type: "conflict", requestId, retryable: false });
     this.name = "ConflictError";
+    this.details = details;
   }
 }
 
@@ -245,7 +240,7 @@ export function mapErrorFromResponse(
     case "rate_limit_error":
       return new RateLimitError(error.message, { requestId: rid, retryAfter: error.retry_after });
     case "conflict":
-      return new ConflictError(error.message, rid);
+      return new ConflictError(error.message, rid, error.details);
     case "reconciliation_required":
       return new ReconciliationRequiredError(error.message, rid, error.message_id);
     case "internal_error":

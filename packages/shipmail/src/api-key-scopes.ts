@@ -23,6 +23,8 @@ export const API_KEY_SCOPES = [
   "mailbox_rules:write",
   "members:read",
   "members:write",
+  "organization:read",
+  "organization:write",
   "messages:read",
   "messages:review",
   "messages:write",
@@ -72,6 +74,9 @@ export const API_KEY_SCOPE_DESCRIPTIONS: Readonly<Record<ApiKeyScope, string>> =
   "members:read": "List and retrieve organization members.",
   "members:write":
     "Invite people, cancel invitations, and share or unshare mailboxes with members.",
+  "organization:read": "Read organization settings: default timezone and AI settings.",
+  "organization:write":
+    "Change organization settings: default timezone, and whether AI models are on.",
   "messages:read": "List and retrieve messages.",
   "messages:review": "Inspect and release messages held by API-agent security review.",
   "messages:write": "Update, move, delete, and inject sandbox messages.",

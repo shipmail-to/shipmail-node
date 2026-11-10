@@ -9,6 +9,7 @@ import type {
   NewsletterDomain,
   NewsletterPreflight,
   NewsletterPreview,
+  NewsletterRecipient,
   NewsletterSenderIdentity,
   NewsletterStatus,
   NewsletterTestSend,
@@ -42,6 +43,7 @@ const mockNewsletter: Newsletter = {
   body_text: "Hello",
   status: "draft",
   archive_visibility: "private",
+  view_in_browser: true,
   feed_entry_url: null,
   styling_mode: "styled",
   track_engagement: false,
@@ -94,6 +96,17 @@ const mockNewsletterDomain: NewsletterDomain = {
   spf_status: "verified",
   dmarc_status: "verified",
   verified_at: "2026-07-01T00:00:00Z",
+  dns_records: [
+    {
+      key: "dkim",
+      type: "TXT",
+      host: "shipmail._domainkey.updates.example.com",
+      value: "v=DKIM1; k=rsa; p=MIIBIjAN",
+      priority: null,
+      ttl: 300,
+      description: "Signs newsletter emails with DKIM so inboxes trust them.",
+    },
+  ],
   created_at: "2026-07-01T00:00:00Z",
   updated_at: "2026-07-01T00:00:00Z",
 };
@@ -306,6 +319,17 @@ describe("Newsletters", () => {
     expect(newsletter.add_utm_tags).toBe(true);
   });
 
+  test("update sends PATCH /newsletters/:id with view_in_browser", async () => {
+    const client = createClient((_input, init) => {
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(init?.body as string)).toEqual({ view_in_browser: false });
+      return Response.json({ ...mockNewsletter, view_in_browser: false });
+    });
+
+    const newsletter = await client.newsletters.update("nws_123", { view_in_browser: false });
+    expect(newsletter.view_in_browser).toBe(false);
+  });
+
   test("list sends GET /newsletters", async () => {
     const response: PaginatedResponse<Newsletter> = {
       data: [mockNewsletter],
@@ -357,6 +381,29 @@ describe("Newsletters", () => {
     expect(items[0]?.id).toBe("nwsdom_123");
   });
 
+  test("domains.get and senderIdentities.get read one item", async () => {
+    const paths: string[] = [];
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("GET");
+      const pathname = new URL(String(input)).pathname;
+      paths.push(pathname);
+      return Response.json(
+        pathname.startsWith("/v1/newsletter-domains/")
+          ? mockNewsletterDomain
+          : mockNewsletterSenderIdentity,
+      );
+    });
+
+    const domain = await client.newsletters.domains.get("nwsdom_123");
+    const identity = await client.newsletters.senderIdentities.get("nwsid_123");
+    expect(domain.id).toBe("nwsdom_123");
+    expect(identity.id).toBe("nwsid_123");
+    expect(paths).toEqual([
+      "/v1/newsletter-domains/nwsdom_123",
+      "/v1/newsletter-sender-identities/nwsid_123",
+    ]);
+  });
+
   test("senderIdentities.list sends GET /newsletter-sender-identities", async () => {
     const response: PaginatedResponse<NewsletterSenderIdentity> = {
       data: [mockNewsletterSenderIdentity],
@@ -372,6 +419,80 @@ describe("Newsletters", () => {
 
     const result = await client.newsletters.senderIdentities.list({ limit: 10 });
     expect(result.data[0]?.id).toBe("nwsid_123");
+  });
+
+  test("domains.create, verify and delete reach the setup endpoints", async () => {
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    const client = createClient((input, init) => {
+      calls.push({
+        method: init?.method ?? "GET",
+        path: new URL(String(input)).pathname,
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      });
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : Response.json(mockNewsletterDomain);
+    });
+
+    const created = await client.newsletters.domains.create({
+      root_domain: "example.com",
+      subdomain: "news",
+      reply_to_address: "hello@example.com",
+    });
+    const verified = await client.newsletters.domains.verify("nwsdom_123");
+    await client.newsletters.domains.delete("nwsdom_123");
+
+    expect(created.dns_records[0]?.key).toBe("dkim");
+    expect(verified.id).toBe("nwsdom_123");
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v1/newsletter-domains",
+        body: {
+          root_domain: "example.com",
+          subdomain: "news",
+          reply_to_address: "hello@example.com",
+        },
+      },
+      { method: "POST", path: "/v1/newsletter-domains/nwsdom_123/verify", body: null },
+      { method: "DELETE", path: "/v1/newsletter-domains/nwsdom_123", body: null },
+    ]);
+  });
+
+  test("senderIdentities.create, update and delete reach the identity endpoints", async () => {
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    const client = createClient((input, init) => {
+      calls.push({
+        method: init?.method ?? "GET",
+        path: new URL(String(input)).pathname,
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      });
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : Response.json(mockNewsletterSenderIdentity);
+    });
+
+    await client.newsletters.senderIdentities.create({
+      newsletter_domain_id: "nwsdom_123",
+      from_name: "Acme",
+      business_name: "Acme Ltd.",
+    });
+    await client.newsletters.senderIdentities.update("nwsid_123", { make_default: true });
+    await client.newsletters.senderIdentities.delete("nwsid_123");
+
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v1/newsletter-sender-identities",
+        body: { newsletter_domain_id: "nwsdom_123", from_name: "Acme", business_name: "Acme Ltd." },
+      },
+      {
+        method: "PATCH",
+        path: "/v1/newsletter-sender-identities/nwsid_123",
+        body: { make_default: true },
+      },
+      { method: "DELETE", path: "/v1/newsletter-sender-identities/nwsid_123", body: null },
+    ]);
   });
 
   test("assets.list sends GET /newsletter-assets", async () => {
@@ -563,6 +684,8 @@ describe("Newsletters", () => {
     const response: NewsletterPreview = {
       object: "newsletter_preview",
       newsletter_id: "nws_123",
+      subject: "What shipped in July",
+      headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       html: "<p>Hello</p>",
       archive_html: "<p>Hello</p>",
       text: "Hello",
@@ -577,6 +700,141 @@ describe("Newsletters", () => {
 
     const result = await client.newsletters.preview("nws_123");
     expect(result.text).toBe("Hello");
+    expect(result.subject).toBe("What shipped in July");
+  });
+
+  test("preview sends preview_as for one subscriber", async () => {
+    const client = createClient((_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        preview_as: { type: "subscriber", subscriber_id: "audmem_1" },
+      });
+      return Response.json({
+        object: "newsletter_preview",
+        newsletter_id: "nws_123",
+        subject: "Hi Ada",
+        headers: {},
+        html: "<p>Hi Ada</p>",
+        archive_html: "<p>Hi</p>",
+        text: "Hi Ada",
+        warnings: [],
+        url_breakdown: emptyUrlBreakdown,
+      });
+    });
+
+    const result = await client.newsletters.preview("nws_123", {
+      preview_as: { type: "subscriber", subscriber_id: "audmem_1" },
+    });
+    expect(result.subject).toBe("Hi Ada");
+  });
+
+  test("preview still takes the method options second, as releases before preview_as did", async () => {
+    let body: BodyInit | null | undefined;
+    let headers: Headers | undefined;
+    const client = createClient((_input, init) => {
+      body = init?.body;
+      headers = new Headers(init?.headers);
+      return Response.json({
+        object: "newsletter_preview",
+        newsletter_id: "nws_123",
+        subject: "Hello",
+        headers: {},
+        html: "<p>Hello</p>",
+        archive_html: "<p>Hello</p>",
+        text: "Hello",
+        warnings: [],
+        url_breakdown: emptyUrlBreakdown,
+      });
+    });
+
+    await client.newsletters.preview("nws_123", { headers: { "X-Trace": "legacy" } });
+    expect(headers?.get("X-Trace")).toBe("legacy");
+    expect(body === undefined || body === null || String(body) === "{}").toBe(true);
+
+    await client.newsletters.preview(
+      "nws_123",
+      { preview_as: { type: "sample" } },
+      { headers: { "X-Trace": "current" } },
+    );
+    expect(headers?.get("X-Trace")).toBe("current");
+    expect(JSON.parse(String(body))).toEqual({ preview_as: { type: "sample" } });
+  });
+
+  const mockRecipient: NewsletterRecipient = {
+    object: "newsletter_recipient",
+    id: "nwsrcp_1",
+    newsletter_id: "nws_123",
+    email_address: "reader@example.com",
+    status: "skipped",
+    reason: "opted_out",
+    subscriber_id: "audmem_1",
+    sent_at: null,
+    delivered_at: null,
+    bounced_at: null,
+    complained_at: null,
+    unsubscribed_at: null,
+    created_at: "2026-07-01T00:00:00Z",
+  };
+
+  test("recipients.list sends GET /newsletters/:id/recipients with filters", async () => {
+    const client = createClient((input, init) => {
+      const url = new URL(String(input));
+      expect(init?.method).toBe("GET");
+      expect(url.pathname).toBe("/v1/newsletters/nws_123/recipients");
+      expect(url.searchParams.get("status")).toBe("skipped");
+      expect(url.searchParams.get("reason")).toBe("opted_out");
+      expect(url.searchParams.get("limit")).toBe("10");
+      return Response.json({
+        data: [mockRecipient],
+        pagination: { next_cursor: null, has_more: false, limit: 10 },
+      });
+    });
+
+    const result = await client.newsletters.recipients.list("nws_123", {
+      status: "skipped",
+      reason: "opted_out",
+      limit: 10,
+    });
+    expect(result.data[0]?.reason).toBe("opted_out");
+  });
+
+  test("recipients.listAutoPaginating follows the cursor", async () => {
+    const cursors: (string | null)[] = [];
+    const client = createClient((input) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/v1/newsletters/nws_123/recipients");
+      const cursor = url.searchParams.get("cursor");
+      cursors.push(cursor);
+      return Response.json({
+        data: [mockRecipient],
+        pagination: {
+          next_cursor: cursor ? null : "next",
+          has_more: cursor === null,
+          limit: 1,
+        },
+      });
+    });
+
+    const items: NewsletterRecipient[] = [];
+    for await (const item of client.newsletters.recipients.listAutoPaginating("nws_123", {
+      limit: 1,
+    })) {
+      items.push(item);
+    }
+    expect(cursors).toEqual([null, "next"]);
+    expect(items).toHaveLength(2);
+  });
+
+  test("recipients.getByEmail sends GET /newsletters/:id/recipients/by-email/:email", async () => {
+    const client = createClient((input, init) => {
+      expect(init?.method).toBe("GET");
+      expect(new URL(String(input)).pathname).toBe(
+        `/v1/newsletters/nws_123/recipients/by-email/${encodeURIComponent("reader@example.com")}`,
+      );
+      return Response.json(mockRecipient);
+    });
+
+    const result = await client.newsletters.recipients.getByEmail("nws_123", "reader@example.com");
+    expect(result.id).toBe("nwsrcp_1");
   });
 
   test("sendTest sends POST /newsletters/:id/test-send", async () => {

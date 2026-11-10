@@ -14,11 +14,13 @@ export type NewsletterStatus =
   | "cancelled"
   | "failed";
 
+/** `public` lists an `email_and_website` issue on the audience's newsletter website and feed. */
 export type NewsletterArchiveVisibility = "private" | "public";
 /**
- * Where an issue goes. `email_and_website` (the default) sends it and lets `archive_visibility`
- * decide whether it also appears on the web. `email` never appears on the web. `website` is
- * published on the audience's newsletter website and feed without any email.
+ * Where an issue goes. `email_and_website` (the default) sends it, and lists it on the audience's
+ * newsletter website and feed when `archive_visibility` is `public`. `email` is never listed on the
+ * website or feed. `website` is published on the website and feed without any email; the audience
+ * needs its website or its feed on.
  */
 export type NewsletterPublishTarget = "email_and_website" | "email" | "website";
 export type NewsletterStylingMode = "styled" | "plain";
@@ -58,8 +60,31 @@ export type NewsletterDomain = {
   readonly spf_status: NewsletterDomainRecordStatus;
   readonly dmarc_status: NewsletterDomainRecordStatus;
   readonly verified_at: string | null;
+  // The records to publish at the DNS host before calling verify.
+  readonly dns_records: readonly NewsletterDomainDnsRecord[];
   readonly created_at: string;
   readonly updated_at: string;
+};
+
+export type NewsletterDomainDnsRecord = {
+  readonly key: "dkim" | "mail_from_mx" | "mail_from_spf" | "dmarc";
+  readonly type: "CNAME" | "MX" | "TXT";
+  readonly host: string;
+  readonly value: string;
+  readonly priority: number | null;
+  readonly ttl: number | null;
+  readonly description: string;
+};
+
+export type CreateNewsletterDomainParams = {
+  // The domain you own, e.g. "example.com".
+  readonly root_domain: string;
+  // A label under root_domain ("news", the default) or the full name ("news.example.com").
+  readonly subdomain?: string | undefined;
+  // The part before @ in the From address. Defaults to "updates".
+  readonly from_local_part?: string | undefined;
+  readonly reply_to_address: string;
+  readonly reply_to_name?: string | undefined;
 };
 
 export type NewsletterSenderIdentity = {
@@ -95,8 +120,11 @@ export type Newsletter = {
   readonly body_html: string | null;
   readonly body_text: string | null;
   readonly status: NewsletterStatus;
+  /** `public` lists an `email_and_website` issue on the audience's newsletter website and feed. */
   readonly archive_visibility: NewsletterArchiveVisibility;
   readonly publish_target: NewsletterPublishTarget;
+  /** Whether the email carries a View in browser link to the issue's own page. */
+  readonly view_in_browser: boolean;
   readonly feed_entry_url: string | null;
   readonly styling_mode: NewsletterStylingMode;
   readonly track_engagement: boolean;
@@ -173,6 +201,11 @@ export type NewsletterUrlBreakdown = {
 export type NewsletterPreview = {
   readonly object: "newsletter_preview";
   readonly newsletter_id: string;
+  /** The subject with merge tags rendered for the reader. */
+  readonly subject: string;
+  /** Header name to value, such as `List-Unsubscribe`, `List-Unsubscribe-Post` and `Reply-To`. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** The full email as delivered, footer and unsubscribe link included. Links are not tracked. */
   readonly html: string;
   readonly archive_html: string;
   readonly text: string;
@@ -182,6 +215,71 @@ export type NewsletterPreview = {
     readonly message: string;
   }[];
   readonly url_breakdown: NewsletterUrlBreakdown;
+};
+
+/** `sample` renders for a sample reader. `subscriber` renders for one reader a send would reach. */
+export type NewsletterPreviewAs =
+  | { readonly type: "sample" }
+  | { readonly type: "subscriber"; readonly subscriber_id: string };
+
+export type PreviewNewsletterParams = {
+  /** Defaults to `{ type: "sample" }`. A subscriber preview also needs the `audiences:read` scope. */
+  readonly preview_as?: NewsletterPreviewAs | undefined;
+};
+
+export const NEWSLETTER_RECIPIENT_STATUSES = [
+  "pending",
+  "retrying",
+  "sending",
+  "sent",
+  "delivered",
+  "bounced",
+  "complained",
+  "failed",
+  "skipped",
+  "unsubscribed",
+] as const;
+export type NewsletterRecipientStatus = (typeof NEWSLETTER_RECIPIENT_STATUSES)[number];
+
+export const NEWSLETTER_RECIPIENT_REASONS = [
+  "opted_out",
+  "suppressed",
+  "never_email",
+  "undeliverable_domain",
+  "dormant",
+  "last_chance_waiting",
+  "no_longer_eligible",
+  "cancelled",
+  "content_in_review",
+  "email_removed",
+  "skipped_other",
+  "bounced",
+  "complained",
+  "unsubscribed",
+  "send_failed",
+] as const;
+export type NewsletterRecipientReason = (typeof NEWSLETTER_RECIPIENT_REASONS)[number];
+
+/** One reader's result for an issue: sent, skipped and why, or what happened after. */
+export type NewsletterRecipient = {
+  readonly object: "newsletter_recipient";
+  readonly id: string;
+  readonly newsletter_id: string;
+  readonly email_address: string;
+  readonly status: NewsletterRecipientStatus;
+  readonly reason: NewsletterRecipientReason | null;
+  readonly subscriber_id: string | null;
+  readonly sent_at: string | null;
+  readonly delivered_at: string | null;
+  readonly bounced_at: string | null;
+  readonly complained_at: string | null;
+  readonly unsubscribed_at: string | null;
+  readonly created_at: string;
+};
+
+export type ListNewsletterRecipientsParams = PaginationParams & {
+  readonly status?: NewsletterRecipientStatus | undefined;
+  readonly reason?: NewsletterRecipientReason | undefined;
 };
 
 export type NewsletterTestSend = {
@@ -208,8 +306,14 @@ export type CreateNewsletterParams = {
   /** The body as Markdown, converted to blocks on the server. Use instead of blocks or body_html. */
   readonly content_markdown?: string | undefined;
   readonly send_window_hours?: number | undefined;
+  /** `public` lists an `email_and_website` issue on the audience's newsletter website and feed. */
   readonly archive_visibility?: NewsletterArchiveVisibility | undefined;
   readonly publish_target?: NewsletterPublishTarget | undefined;
+  /**
+   * Whether the email carries a View in browser link to the issue's own page. Omitted on create,
+   * it is true for a public `email_and_website` issue and false otherwise.
+   */
+  readonly view_in_browser?: boolean | undefined;
   readonly feed_entry_url?: string | null | undefined;
   readonly styling_mode?: NewsletterStylingMode | undefined;
   readonly track_engagement?: boolean | undefined;
@@ -267,14 +371,48 @@ export type CreateNewsletterFromChangelogParams = {
       }
     | undefined;
   readonly send_window_hours?: number | undefined;
+  /** `public` lists an `email_and_website` issue on the audience's newsletter website and feed. */
   readonly archive_visibility?: NewsletterArchiveVisibility | undefined;
   readonly publish_target?: NewsletterPublishTarget | undefined;
+  /**
+   * Whether the email carries a View in browser link to the issue's own page. Omitted on create,
+   * it is true for a public `email_and_website` issue and false otherwise.
+   */
+  readonly view_in_browser?: boolean | undefined;
   readonly feed_entry_url?: string | null | undefined;
   readonly styling_mode?: NewsletterStylingMode | undefined;
 };
 
 export type ListNewsletterDomainsParams = PaginationParams;
 export type ListNewsletterSenderIdentitiesParams = PaginationParams;
+
+export type CreateNewsletterSenderIdentityParams = {
+  readonly newsletter_domain_id: string;
+  readonly from_name: string;
+  readonly business_name: string;
+  readonly postal_address?: string | null | undefined;
+  readonly footer_text?: string | null | undefined;
+  /**
+   * Omitted: the organization's first identity becomes the default, otherwise the default is
+   * unchanged. `true` makes this identity the default. `false` does not, and an identity that was
+   * the default stops being it.
+   */
+  readonly make_default?: boolean | undefined;
+};
+
+export type UpdateNewsletterSenderIdentityParams = {
+  readonly newsletter_domain_id?: string | undefined;
+  readonly from_name?: string | undefined;
+  readonly business_name?: string | undefined;
+  readonly postal_address?: string | null | undefined;
+  readonly footer_text?: string | null | undefined;
+  /**
+   * Omitted: the organization's first identity becomes the default, otherwise the default is
+   * unchanged. `true` makes this identity the default. `false` does not, and an identity that was
+   * the default stops being it.
+   */
+  readonly make_default?: boolean | undefined;
+};
 export type ListNewslettersParams = PaginationParams;
 export type ListNewsletterAssetsParams = PaginationParams & {
   readonly kind?: NewsletterAssetKind | undefined;
@@ -478,4 +616,5 @@ type NewsletterBlockContent =
   | { readonly type: "divider" }
   | { readonly type: "spacer"; readonly height?: number | undefined }
   | { readonly type: "code"; readonly code: string }
+  | { readonly type: "event"; readonly event_id: string }
   | { readonly type: "custom_html"; readonly html: string };

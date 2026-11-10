@@ -69,6 +69,12 @@ shipmail messages list --client-reference crm-123
 shipmail messages analytics --updated-after 2026-07-01T00:00:00Z --limit 100
 shipmail messages reply msg_123 --to user@example.com --text "Thanks"
 
+# Transactional sending: a subdomain, its DNS records, then a sender whose replies go to a mailbox
+shipmail transactional-domains create --root-domain example.com --subdomain mail
+shipmail transactional-domains verify txdom_123
+shipmail transactional-senders create --domain-id txdom_123 --mailbox-id mbx_123 --local-part hello --display-name "Acme"
+shipmail transactional-senders update txbind_123 --state disabled
+
 # SMTP credentials for a transactional sender (the password is printed once)
 shipmail smtp-credentials create --from notifications@notify.example.com --name "Supabase Auth"
 shipmail smtp-credentials list --from notifications@notify.example.com
@@ -119,6 +125,8 @@ shipmail inbox get-draft 550e8400-e29b-41d4-a716-446655440000 thr_123 drf_123
 shipmail inbox send-draft 550e8400-e29b-41d4-a716-446655440000 thr_123 drf_123 --expected-content-sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 # Save a new message to Drafts for a human to review and send; this never sends
 shipmail inbox compose-draft 550e8400-e29b-41d4-a716-446655440000 --to user@example.com --subject "Kickoff" --text "Draft for review"
+# Correct that draft; its id and review_url stay the same, and this never sends
+shipmail inbox update-compose-draft 550e8400-e29b-41d4-a716-446655440000 eml_123 --text "Corrected draft"
 shipmail inbox thread-attention 550e8400-e29b-41d4-a716-446655440000 thr_123 --done true --expected-version 8
 shipmail inbox reply-message 550e8400-e29b-41d4-a716-446655440000 eml_123 --to user@example.com --text "Thanks"
 shipmail inbox reply-thread 550e8400-e29b-41d4-a716-446655440000 thr_123 --to user@example.com --text "Following up"
@@ -141,6 +149,9 @@ shipmail newsletters update nws_123 --subject "Updated subject"
 shipmail newsletters update nws_123 --markdown @issue.md
 # A concurrent update exits with conflict (409); fetch the latest newsletter before retrying.
 shipmail newsletters preview nws_123
+shipmail newsletters preview nws_123 --subscriber-id audmem_123
+shipmail newsletters recipients list nws_123 --status skipped
+shipmail newsletters recipients by-email nws_123 reader@example.com
 shipmail newsletters test-send nws_123 --recipient-email owner@example.com
 shipmail newsletters preflight nws_123
 shipmail newsletters schedule nws_123 --scheduled-at 2026-08-01T09:00:00.000Z
@@ -238,17 +249,20 @@ Use repeatable `--header "Name: value"` flags for request headers. Use `--output
 - `mailboxes sandbox-inbound`
 - `webhooks list|create|update|test|deliveries|replay-delivery`
 - `event-queues list|create|get|delete|events|ack`
+- `transactional-domains list|create|get|verify|delete`
+- `transactional-senders list|create|get|update`
 - `smtp-credentials list|create|revoke`
-- `suppressions add|list|remove`
+- `suppressions add|list|remove|resubscribe` (`resubscribe <email> --consent-source text` lifts a newsletter opt-out)
 - `templates list|create|get|update|delete|publish|render|versions|version|restore` (`messages send --template` sends one)
 - `audiences list|create|get|update|delete`
 - `audiences feed get|update|rotate|revoke`
 - `audiences welcome get|enable|disable|add-step|update-step|remove-step`
 - `audiences segments list|create|get|update|delete`
 - `audiences subscribers add|list|get|by-email|update|unsubscribe|resubscribe|resend-confirmation|remove`
-- `newsletter-sender-identities list`
-- `newsletter-domains list`
-- `newsletters create|update|preview|preflight|test-send|schedule|cancel|resume`
+- `newsletter-sender-identities list|get|create|update|delete`
+- `newsletter-domains list|get|create|verify|delete`
+- `newsletters create|update|preview|preflight|test-send|schedule|send-more|cancel|resume`
+- `newsletters recipients list|by-email`
 - `newsletter-assets list|upload|register-url`
 
 Member output uses the roles `owner`, `admin`, and `member`. Its `mailbox_access.scope` is `all` or

@@ -28,6 +28,7 @@ const mockPage: BookingPage = {
   window_start_minutes: 540,
   window_end_minutes: 1020,
   timezone: "America/New_York",
+  lock_timezone: false,
   buffer_minutes: 0,
   minimum_notice_minutes: 0,
   max_advance_days: 30,
@@ -45,6 +46,7 @@ describe("BookingPages", () => {
       expect(JSON.parse(init?.body as string)).toMatchObject({
         slug: "intro",
         conferencing_provider: "google_meet",
+        lock_timezone: true,
       });
       return Response.json(mockPage);
     });
@@ -58,6 +60,7 @@ describe("BookingPages", () => {
       window_start_minutes: 540,
       window_end_minutes: 1020,
       timezone: "America/New_York",
+      lock_timezone: true,
       conferencing_provider: "google_meet",
     });
     expect(page.id).toBe("bkp_1");
@@ -87,6 +90,31 @@ describe("BookingPages", () => {
     });
     const page = await client.bookingPages.update("bkp_1", { conferencing_provider: null });
     expect(page.conferencing_provider).toBeNull();
+  });
+
+  test("slots sends GET /booking-pages/:id/slots with the window", async () => {
+    const client = createClient((input, init) => {
+      const url = new URL(String(input));
+      expect(init?.method).toBe("GET");
+      expect(url.pathname).toBe("/v1/booking-pages/bkp_1/slots");
+      expect(url.searchParams.get("from")).toBe("2026-11-09T00:00:00Z");
+      expect(url.searchParams.get("to")).toBe("2026-11-16T00:00:00Z");
+      return Response.json({
+        object: "booking_page_slots",
+        booking_page_id: "bkp_1",
+        timezone: "Europe/Lisbon",
+        duration_minutes: 30,
+        from: "2026-11-09T00:00:00.000Z",
+        to: "2026-11-16T00:00:00.000Z",
+        slots: [{ start: "2026-11-09T09:00:00.000Z", end: "2026-11-09T09:30:00.000Z" }],
+      });
+    });
+    const result = await client.bookingPages.slots("bkp_1", {
+      from: "2026-11-09T00:00:00Z",
+      to: "2026-11-16T00:00:00Z",
+    });
+    expect(result.timezone).toBe("Europe/Lisbon");
+    expect(result.slots[0]?.end).toBe("2026-11-09T09:30:00.000Z");
   });
 
   test("delete sends DELETE /booking-pages/:id and returns void", async () => {
